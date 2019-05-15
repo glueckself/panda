@@ -70,10 +70,10 @@ if [ "$PANDA_LLVM" != "" ]; then
     LLVM_CONFIG="--enable-llvm --with-llvm=${PANDA_LLVM}"
 else
     ## Fallback to system LLVM.
-    if llvm-config-3.3 --version >/dev/null 2>/dev/null; then
-        echo "Found LLVM on $(llvm-config-3.3 --prefix) -- LLVM SUPPORT IS ENABLED"
-        LLVM_CONFIG="--enable-llvm --with-llvm=$(llvm-config-3.3 --prefix)"
-    elif llvm-config --version >/dev/null 2>/dev/null && [ $(llvm-config --version) == "3.3" ]; then
+    if llvm-config --version >/dev/null 2>/dev/null; then
+        echo "Found LLVM on $(llvm-config --prefix) -- LLVM SUPPORT IS ENABLED"
+        LLVM_CONFIG="--enable-llvm --with-llvm=$(llvm-config --prefix)"
+    elif llvm-config --version >/dev/null 2>/dev/null && [ $(llvm-config --version) == "3.3svn" ]; then
         echo "Found LLVM on $(llvm-config --prefix) -- LLVM SUPPORT IS ENABLED"
         LLVM_CONFIG="--enable-llvm --with-llvm=$(llvm-config --prefix)"
     else
@@ -108,12 +108,14 @@ fi
 
 ## Configure and compile.
 "${PANDA_DIR_REL}/configure" \
-    --target-list=x86_64-softmmu,i386-softmmu,arm-softmmu,ppc-softmmu \
+	--extra-cflags="-I /home/wenzl/git/diss/es-tainting-impl/sysroot/usr/include" \
+	--extra-ldflags="-L /home/wenzl/git/diss/es-tainting-impl/sysroot/usr/lib"\
+    --target-list=i386-softmmu,arm-softmmu \
     --prefix="$(pwd)/install" \
     $COMPILER_CONFIG \
     $LLVM_CONFIG \
     $MISC_CONFIG \
     "$@"
-make -j ${PANDA_NPROC:-$(nproc || sysctl -n hw.ncpu)}
+#make -j ${PANDA_NPROC:-$(nproc || sysctl -n hw.ncpu)}
 
 # vim: set et ts=4 sts=4 sw=4 ai ft=sh :
