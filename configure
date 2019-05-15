@@ -3143,7 +3143,7 @@ int main(void) {
 EOF
 
 if ! compile_prog "$CFLAGS" "$LIBS" ; then
-    error_exit "sizeof(size_t) doesn't match GLIB_SIZEOF_SIZE_T."\
+    echo "sizeof(size_t) doesn't match GLIB_SIZEOF_SIZE_T."\
                "You probably need to set PKG_CONFIG_LIBDIR"\
 	       "to point to the right pkg-config files for your"\
 	       "build target"
@@ -5642,7 +5642,7 @@ if test "$llvm" = "yes" ; then
   echo "LLVMCXX:=$clangxx" >> $config_host_mak
   echo "LLVM_LINK:=$llvm_link" >> $config_host_mak
   echo "CONFIG_LLVM=y" >> $config_host_mak
-  echo "LLVM_CXXFLAGS=\$(filter-out $FILTERFLAGS,$llvm_cxxflags)" >> $config_host_mak
+  echo "LLVM_CXXFLAGS=\$(filter-out $FILTERFLAGS,$llvm_cxxflags -Wno-unknown-warning-option)" >> $config_host_mak
   echo "LLVMDIR=$llvmdir" >> $config_host_mak
 fi
 
