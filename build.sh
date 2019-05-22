@@ -112,6 +112,7 @@ fi
 	--extra-ldflags="-L /home/wenzl/git/diss/es-tainting-impl/sysroot/usr/lib"\
     --target-list=i386-softmmu,arm-softmmu \
     --prefix="$(pwd)/install" \
+    --enable-debug \
     $COMPILER_CONFIG \
     $LLVM_CONFIG \
     $MISC_CONFIG \
