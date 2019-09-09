@@ -125,14 +125,20 @@ $(PLOG_READER_PROG): panda/src/plog_reader.o \
 	panda/src/plog-cc.o \
 	#plog.pb-c.o \
 	#panda/src/plog.o \
-
 	$(call LINK,$^)
 
-PROGS+=$(RR_PRINT_PROG) plog_pb2.py
+CAPSTONE_LIBDIR=$PANDA_SYSROOT_LIBS
+CAPSTONE_INC=$PANDA_SYSROOT_INC
 
-PROGS+=$(RR_RMVAPIC_PROG)
+PROTOBUF_LIBDIR=$PANDA_SYSROOT_LIBS
+PROTOBUF_INC=$PANDA_SYSROOT_INC
 
-PROGS+=$(PLOG_READER_PROG) 
+$(PANDALOG_ANALYZER_PROG): panda/tools/pandalog_analyzer.o \
+	plog.pb.o \
+	panda/src/plog-cc.o \
+	#plog.pb-c.o \
+	#panda/src/plog.o \
+	$(call LINK,$^ -L$(CAPSTONE_LIBDIR) -lcapstone -I$(CAPSTONE_INC) -I$(PROTOBUF_INC) -L$(PROTOBUF_LIBDIR) -lprotobuf )
 
 clean: clean-panda
 

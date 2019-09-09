@@ -106,11 +106,29 @@ if [ -f "$BUILD_LOCAL" ]; then
     . "$BUILD_LOCAL"
 fi
 
+#-DTAINT2_DEBUG" \
+#-DPRINT_TAINTLOG" \
+
+### Translate auxiliary header files holding instructions for tainting into source file
+for f in include/qemu/bswap.h
+	do python2 header2module.py < $f > ${f%.h}.c
+done
+
+##setup sysroot paths
+PANDA_SYSROOT_CONFIG_HEADER="--enable-sysroot-inc --with-panda-sysroot-inc=${PANDA_SYSROOT_INC}"
+PANDA_SYSROOT_CONFIG_LIBS="--enable-sysroot-libs --with-panda-sysroot-libs=${PANDA_SYSROOT_LIBS}"
+
+##setup auc xpp header path
+PANDA_AUX_CPP_HEADER="--enable-aux-libcpp-header --with-aux-libcpp-header=${PANDA_SYSROOT_INC}/c++/v1"
+
 ## Configure and compile.
 "${PANDA_DIR_REL}/configure" \
-	--extra-cflags="-I /home/wenzl/git/diss/es-tainting-impl/sysroot/usr/include" \
-	--extra-ldflags="-L /home/wenzl/git/diss/es-tainting-impl/sysroot/usr/lib"\
+	--extra-cflags="-I ${PANDA_SYSROOT_INC} -DPRINT_TAINTLOG" \
+	--extra-ldflags="-L ${PANDA_SYSROOT_LIBS}"\
     --target-list=i386-softmmu,arm-softmmu \
+    $PANDA_SYSROOT_CONFIG_HEADER \
+    $PANDA_SYSROOT_CONFIG_LIBS \
+    $PANDA_AUX_CPP_HEADER \
     --prefix="$(pwd)/install" \
     --enable-debug \
     $COMPILER_CONFIG \
