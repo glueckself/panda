@@ -528,6 +528,7 @@ static int blkdebug_open(BlockDriverState *bs, QDict *options, int flags,
                    s->max_transfer);
         goto out;
     }
+    align = MAX(s->align, bs->file->bs->bl.request_alignment);
 
     s->opt_write_zero = qemu_opt_get_size(opts, "opt-write-zero", 0);
     if (s->opt_write_zero &&

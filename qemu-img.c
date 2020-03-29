@@ -2409,6 +2409,13 @@ static int img_convert(int argc, char **argv)
         goto out;
     }
 
+    if (bs_n > 1 && out_baseimg) {
+        error_report("Having a backing file for the target makes no sense when "
+                     "concatenating multiple input images");
+        ret = -1;
+        goto out;
+    }
+
     /* Check if compression is supported */
     if (s.compressed) {
         bool encryption =

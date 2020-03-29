@@ -5344,6 +5344,7 @@ static int qcow2_amend_options(BlockDriverState *bs, QemuOpts *opts,
         ret = blk_truncate(blk, new_size, true, PREALLOC_MODE_OFF, errp);
         blk_unref(blk);
         if (ret < 0) {
+            error_report_err(local_err);
             return ret;
         }
     }

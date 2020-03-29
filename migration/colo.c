@@ -222,6 +222,7 @@ void qmp_xen_set_replication(bool enable, bool primary,
                              bool has_failover, bool failover,
                              Error **errp)
 {
+#ifdef CONFIG_REPLICATION
     ReplicationMode mode = primary ?
                            REPLICATION_MODE_PRIMARY :
                            REPLICATION_MODE_SECONDARY;
@@ -240,10 +241,14 @@ void qmp_xen_set_replication(bool enable, bool primary,
         }
         replication_stop_all(failover, failover ? NULL : errp);
     }
+#else
+    abort();
+#endif
 }
 
 ReplicationStatus *qmp_query_xen_replication_status(Error **errp)
 {
+#ifdef CONFIG_REPLICATION
     Error *err = NULL;
     ReplicationStatus *s = g_new0(ReplicationStatus, 1);
 
@@ -258,10 +263,14 @@ ReplicationStatus *qmp_query_xen_replication_status(Error **errp)
 
     error_free(err);
     return s;
+#else
+    abort();
+#endif
 }
 
 void qmp_xen_colo_do_checkpoint(Error **errp)
 {
+#ifdef CONFIG_REPLICATION
     replication_do_checkpoint_all(errp);
     /* Notify all filters of all NIC to do checkpoint */
     colo_notify_filters_event(COLO_EVENT_CHECKPOINT, errp);

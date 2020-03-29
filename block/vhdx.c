@@ -1705,12 +1705,16 @@ static int vhdx_create_bat(BlockBackend *blk, BDRVVHDXState *s,
         ret = blk_truncate(blk, data_file_offset, false, PREALLOC_MODE_OFF,
                            errp);
         if (ret < 0) {
+            error_setg_errno(errp, -ret,
+                            "Failed to resize the underlying file");
             goto exit;
         }
     } else if (type == VHDX_TYPE_FIXED) {
         ret = blk_truncate(blk, data_file_offset + image_size, false,
                            PREALLOC_MODE_OFF, errp);
         if (ret < 0) {
+            error_setg_errno(errp, -ret,
+                            "Failed to resize the underlying file");
             goto exit;
         }
     } else {
