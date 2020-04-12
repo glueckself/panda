@@ -1,7 +1,3 @@
-include:
-  - local: '/.gitlab-ci-edk2.yml'
-  - local: '/.gitlab-ci-opensbi.yml'
-
 before_script:
  - apt-get update -qq
  - apt-get install -y -qq flex bison libglib2.0-dev libpixman-1-dev genisoimage
