@@ -54,8 +54,9 @@ static inline int panda_physical_memory_rw(hwaddr addr, uint8_t *buf, int len,
                                            bool is_write) {
     hwaddr l = len;
     hwaddr addr1;
+    //TODO: panda: not sure if MEMTXATTRS_UNSPECIFIED is the right value here
     MemoryRegion *mr = address_space_translate(&address_space_memory, addr,
-                                               &addr1, &l, is_write);
+                                               &addr1, &l, is_write, MEMTXATTRS_UNSPECIFIED);
 
     if (!memory_access_is_direct(mr, is_write)) {
         // fail for MMIO regions of physical address space

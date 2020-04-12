@@ -29,9 +29,7 @@
 #include "sysemu/replay.h"
 #include "sysemu/cpus.h"
 
-#ifdef CONFIG_SOFTMMU
 #include "panda/rr/rr_log_all.h"
-#endif
 
 #ifdef CONFIG_POSIX
 #include <pthread.h>
@@ -639,9 +637,7 @@ int64_t timerlistgroup_deadline_ns(QEMUTimerListGroup *tlg)
     int64_t deadline = -1;
     QEMUClockType type;
 
-#ifdef CONFIG_SOFTMMU
     if (rr_in_replay() || rr_replay_requested) return RR_REPLAY_DEADLINE;
-#endif
 
     for (type = 0; type < QEMU_CLOCK_MAX; type++) {
         if (qemu_clock_use_for_deadline(type)) {

@@ -66,7 +66,7 @@ static void tcg_handle_interrupt(CPUState *cpu, int mask)
     }
     
     if(use_icount) {
-        atomic_set(&cpu_neg(cpu)->icount_decr_ptr->u16.high, -1);
+        atomic_set(&cpu_neg(cpu)->icount_decr.u16.high, -1);
         if (!cpu->can_do_io
             && (mask & ~old_mask) != 0) {
             cpu_abort(cpu, "Raised interrupt while not in I/O function");

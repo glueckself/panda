@@ -14,7 +14,6 @@ PANDAENDCOMMENT */
 #include <stdint.h>
 #include <string.h>
 #include <dlfcn.h>
-#include <glib.h>
 
 #include "panda/plugin.h"
 #include "qapi/qmp/qdict.h"
@@ -31,6 +30,9 @@ PANDAENDCOMMENT */
 #endif
 
 #include "panda/common.h"
+
+//TODO: panda: qemu now also includes stuff from glib.h, but sets min/max version.
+#include <glib.h>
 
 const gchar *panda_bool_true_strings[] =  {"y", "yes", "true", "1", NULL};
 const gchar *panda_bool_false_strings[] = {"n", "no", "false", "0", NULL};

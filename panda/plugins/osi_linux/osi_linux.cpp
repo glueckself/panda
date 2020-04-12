@@ -10,7 +10,6 @@
 #include <cstdlib>
 #include <cerrno>
 #include <map>
-#include <glib.h>
 
 #include "panda/plugin.h"
 #include "panda/plugin_plugin.h"
@@ -22,6 +21,8 @@
 #include "default_profile.h"
 #include "kernel_2_4_x_profile.h"
 
+//TODO: panda: qemu now also includes stuff from glib.h, but sets min/max version.
+#include <glib.h>
 /*
  * Functions interfacing with QEMU/PANDA should be linked as C.
  * C++ function name mangling breaks linkage.

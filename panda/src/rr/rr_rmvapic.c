@@ -1,12 +1,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <glib.h>
 
 #define RR_LOG_STANDALONE
 #include <panda/include/panda/rr/rr_log.h>
 #include "qemu/osdep.h"
 #include "cpu.h"
+
+//TODO: panda: qemu now also includes stuff from glib.h, but sets min/max version.
+#include <glib.h>
 
 /******************************************************************************************/
 /* GLOBALS */

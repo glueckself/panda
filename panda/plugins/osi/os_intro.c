@@ -19,7 +19,6 @@ PANDAENDCOMMENT */
 
 // glib provides some nifty string manipulation functions
 // https://developer.gnome.org/glib/stable/glib-String-Utility-Functions.html
-#include <glib.h>
 #include <gmodule.h>
 #include <glib/gprintf.h>
 
@@ -29,6 +28,9 @@ PANDAENDCOMMENT */
 #include "osi_types.h"
 #include "osi_int_fns.h"
 #include "os_intro.h"
+
+//TODO: panda: qemu now also includes stuff from glib.h, but sets min/max version.
+#include <glib.h>
 
 bool init_plugin(void *);
 void uninit_plugin(void *);

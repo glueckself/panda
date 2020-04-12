@@ -1,13 +1,15 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <glib.h>
 
 #include "panda/debug.h"
 #include "panda/plugin.h"
 #include "panda/common.h"
 #include "panda/plog.h"
 #include "panda/plog-cc-bridge.h"
+
+//TODO: panda: qemu now also includes stuff from glib.h, but sets min/max version.
+#include <glib.h>
 
 #ifdef TARGET_ARM
 /* Return the exception level which controls this address translation regime */

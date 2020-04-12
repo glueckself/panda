@@ -217,7 +217,6 @@ void colo_do_failover(void)
     }
 }
 
-#ifdef CONFIG_REPLICATION
 void qmp_xen_set_replication(bool enable, bool primary,
                              bool has_failover, bool failover,
                              Error **errp)
@@ -274,8 +273,10 @@ void qmp_xen_colo_do_checkpoint(Error **errp)
     replication_do_checkpoint_all(errp);
     /* Notify all filters of all NIC to do checkpoint */
     colo_notify_filters_event(COLO_EVENT_CHECKPOINT, errp);
-}
+#else
+        abort();
 #endif
+}
 
 COLOStatus *qmp_query_colo_status(Error **errp)
 {

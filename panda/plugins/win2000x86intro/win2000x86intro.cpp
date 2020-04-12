@@ -13,9 +13,11 @@
 PANDAENDCOMMENT */
 #define __STDC_FORMAT_MACROS
 
-#include <glib.h>
 #include "panda/plugin.h"
 #include "panda/plugin_plugin.h"
+
+//TODO: panda: qemu now also includes stuff from glib.h, but sets min/max version.
+#include <glib.h>
 
 extern "C" {
 

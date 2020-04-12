@@ -2,10 +2,12 @@
 #include <stdint.h>
 #include <assert.h>
 #include <dlfcn.h>
-#include <glib.h>
 #include "panda/plugin.h"
 #include "syscalls2_info.h"
 #include "syscalls2_int_fns.h"
+
+//TODO: panda: qemu now also includes stuff from glib.h, but sets min/max version.
+#include <glib.h>
 
 const syscall_info_t *syscall_info;
 const syscall_meta_t *syscall_meta;

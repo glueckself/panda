@@ -35,7 +35,7 @@
 #include <assert.h>
 
 #include "qemu/log.h"
-#include "qom/cpu.h"
+#include "hw/core/cpu.h"
 
 // Used later for enum to string macros
 #define GENERATE_ENUM(ENUM) ENUM

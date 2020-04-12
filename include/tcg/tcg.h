@@ -1144,7 +1144,7 @@ static inline TCGMemOpIdx make_memop_idx(MemOp op, unsigned idx)
  */
 static inline MemOp get_memop(TCGMemOpIdx oi)
 {
-    return (TCGMemOp)(oi >> 4);
+    return (MemOp)(oi >> 4);
 }
 
 /**
