@@ -11,6 +11,7 @@
 #define __PANDALOG_CC_H_
 
 extern "C" {
+#define _Static_assert static_assert
 #ifndef PLOG_READER
 #include "panda/rr/rr_log.h"
 #include "panda/common.h"
@@ -18,6 +19,7 @@ extern "C" {
 
 #include <zlib.h>
 #include "panda/plog.h"
+#undef _Static_assert
 }
 
 #include <stdio.h>

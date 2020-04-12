@@ -15,15 +15,21 @@
 #include "exec/exec-all.h"
 #include "exec/memory.h"
 #include "io/channel-file.h"
+#include "migration/global_state.h"
+#include "migration/qemu-file-channel.h"
 #include "migration/migration.h"
+#include "migration/savevm.h"
 #include "migration/qemu-file.h"
 #include "sysemu/cpus.h"
 #include "sysemu/sysemu.h"
+#include "sysemu/runstate.h"
 
 #include "panda/rr/rr_log.h"
 #include "panda/common.h"
 #include "qemu/memfd.h"
 
+//TODO: panda: memfd seems to be defined by qemu. do we need this for compatibility?
+#if 0
 #if defined CONFIG_LINUX && !defined CONFIG_MEMFD
 #include <sys/syscall.h>
 #include <asm/unistd.h>
@@ -35,6 +41,7 @@ static int memfd_create(const char *name, unsigned int flags)
     return -1;
 #endif
 }
+#endif
 #endif
 
 #include "panda/checkpoint.h"
@@ -172,7 +179,7 @@ void panda_restore(void *opaque) {
 
     QIOChannelFile *iochannel = qio_channel_file_new_fd(checkpoint->memfd);
     QEMUFile *file = qemu_fopen_channel_input(QIO_CHANNEL(iochannel));
-    qemu_system_reset(VMRESET_SILENT);
+    qemu_system_reset(SHUTDOWN_CAUSE_NONE);
     MigrationIncomingState* mis = migration_incoming_get_current();
     mis->from_src_file = file;
 

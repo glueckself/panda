@@ -17,14 +17,15 @@ PANDAENDCOMMENT */
 
 #include "panda/plugin.h"
 #include "qapi/qmp/qdict.h"
-#include "qmp-commands.h"
-#include "hmp.h"
+#include "qapi/qapi-types-panda.h"
+#include "qapi/qapi-commands-panda.h"
+#include "monitor/hmp.h"
 #include "qapi/error.h"
 #include "monitor/monitor.h"
 
 #ifdef CONFIG_LLVM
 //#include "panda/panda_helper_call_morph.h"
-#include "tcg.h"
+#include "tcg/tcg.h"
 #include "panda/tcg-llvm.h"
 #include "panda/helper_runtime.h"
 #endif

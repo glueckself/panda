@@ -3,7 +3,9 @@
 
 #ifndef HW_POISON_H
 #define HW_POISON_H
-#ifdef __GNUC__
+//#ifdef __GNUC__
+//TODO: panda: panda uses a lot of those, so I disabled them all
+#if 0
 
 #pragma GCC poison TARGET_I386
 #pragma GCC poison TARGET_X86_64

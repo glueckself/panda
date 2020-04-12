@@ -60,7 +60,7 @@
 # BDG 20120821
 ##
 { 'command': 'load_plugin', 'data': { '*file_name': 'str', 'plugin_name': 'str',
-+                                      '*plugin_args': 'str'} }
+                                      '*plugin_args': 'str'} }
 
 ##
 # @unload_plugin:

@@ -42,15 +42,24 @@
 
 #include "qemu/osdep.h"
 #include "qemu-common.h"
-#include "qmp-commands.h"
-#include "hmp.h"
+#include "qapi/qapi-types-panda.h"
+#include "qapi/qapi-commands-control.h"
+#include "qapi/qapi-commands-misc.h"
+#include "qapi/qapi-commands-panda.h"
+#include "qapi/qapi-types-run-state.h"
+#include "monitor/hmp.h"
 #include "panda/rr/rr_log.h"
+#include "migration/global_state.h"
+#include "migration/qemu-file-channel.h"
 #include "migration/migration.h"
+#include "migration/snapshot.h"
 #include "include/exec/address-spaces.h"
 #include "include/exec/exec-all.h"
 #include "migration/qemu-file.h"
+#include "migration/savevm.h"
 #include "io/channel-file.h"
 #include "sysemu/sysemu.h"
+#include "sysemu/runstate.h"
 #include "panda/callback_support.h"
 #include "exec/gdbstub.h"
 #include "sysemu/cpus.h"
@@ -1446,6 +1455,8 @@ int rr_do_begin_record(const char* file_name_full, CPUState* cpu_state)
     char* rr_path = dirname(rr_path_base);
     char* rr_name = basename(rr_name_base);
     int snapshot_ret = -1;
+    Error *err;
+
     if (rr_debug_whisper()) {
         qemu_log("Begin vm record for file_name_full = %s\n", file_name_full);
         qemu_log("path = [%s]  file_name_base = [%s]\n", rr_path, rr_name);
@@ -1454,7 +1465,8 @@ int rr_do_begin_record(const char* file_name_full, CPUState* cpu_state)
 
     if (rr_record_requested == RR_RECORD_FROM_REQUEST) {
         printf("loading snapshot:\t%s\n", rr_snapshot_name);
-        snapshot_ret = load_vmstate(rr_snapshot_name);
+        snapshot_ret = load_snapshot(rr_snapshot_name, &err);
+	//TODO: panda: do something with err
         g_free(rr_snapshot_name);
         rr_snapshot_name = NULL;
     }
@@ -1553,7 +1565,8 @@ int rr_do_begin_replay(const char* file_name_full, CPUState* cpu_state)
     }
     QEMUFile* snp = qemu_fopen_channel_input(QIO_CHANNEL(ioc));
 
-    qemu_system_reset(VMRESET_SILENT);
+    //TODO: panda: maybe some better shutdowncause?
+    qemu_system_reset(SHUTDOWN_CAUSE_NONE);
     MigrationIncomingState* mis = migration_incoming_get_current();
     mis->from_src_file = snp;
     snapshot_ret = qemu_loadvm_state(snp);
@@ -1648,7 +1661,7 @@ void rr_do_end_replay(int is_error)
         panda_cleanup();
         abort();
     } else {
-        qemu_system_shutdown_request();
+        qemu_system_shutdown_request(SHUTDOWN_CAUSE_NONE);
     }
 #endif // CONFIG_SOFTMMU
 }

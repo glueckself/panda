@@ -2843,7 +2843,7 @@ void cpu_check_watchpoint(CPUState *cpu, vaddr addr, vaddr len,
             } else {
                 wp->flags |= BP_WATCHPOINT_HIT_WRITE;
             }
-            wp->hitaddr = MAX(addr, wp->vaddr);
+            wp->hitaddr = MAX(addr, wp->virtaddr);
             wp->hitattrs = attrs;
 
             if (unlikely(cpu->reverse_flags & GDB_RCONT)) {
@@ -3546,7 +3546,8 @@ MemTxResult cpu_physical_memory_rw_ex(hwaddr addr, uint8_t *buf,
                                      int len, int is_write, bool safe) {
     hwaddr l = len;
     hwaddr addr1;
-    MemoryRegion *mr = address_space_translate(&address_space_memory, addr, &addr1, &l, is_write);
+    //TODO: panda: maybe better memtxattrs?
+    MemoryRegion *mr = address_space_translate(&address_space_memory, addr, &addr1, &l, is_write, MEMTXATTRS_UNSPECIFIED);
     if (safe && !memory_access_is_direct(mr, is_write)) {
         return MEMTX_ERROR;
     }
