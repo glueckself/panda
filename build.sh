@@ -83,7 +83,7 @@ else
 fi
 
 ### Set other configuration flags, depending on environment.
-MISC_CONFIG="--python=python2 --disable-vhost-net"
+MISC_CONFIG="--python=python3 --disable-vhost-net"
 if pkg-config --exists --atleast-version 4.9 xencontrol; then
     ## Enable xencontrol compat API for libxen-4.9 (Ubuntu 18.04LTS).
     MISC_CONFIG="$MISC_CONFIG --extra-cflags=-DXC_WANT_COMPAT_DEVICEMODEL_API"
@@ -110,9 +110,9 @@ fi
 #-DPRINT_TAINTLOG" \
 
 ### Translate auxiliary header files holding instructions for tainting into source file
-for f in include/qemu/bswap.h
-	do python2 header2module.py < $f > ${f%.h}.c
-done
+#for f in include/qemu/bswap.h
+#	do python2 header2module.py < $f > ${f%.h}.c
+#done
 
 ##setup sysroot paths
 PANDA_SYSROOT_CONFIG_HEADER="--enable-sysroot-inc --with-panda-sysroot-inc=${PANDA_SYSROOT_INC}"
