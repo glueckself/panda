@@ -317,7 +317,6 @@ struct qemu_work_item;
  *           CPU and return to its top level loop.
  * @singlestep_enabled: Flags for single-stepping.
  * @icount_extra: Instructions until next timer event.
- * @icount_decr: Number of cycles left, with interrupt flag in high bit.
  * @can_do_io: Nonzero if memory-mapped IO is safe. Deterministic execution
  * requires that IO only be performed on the last instruction of a TB
  * so that interrupts take effect immediately.
@@ -427,11 +426,6 @@ struct CPUState {
     int cpu_index;
     int cluster_index;
     uint32_t halted;
-    //TODO: panda: seems to use a pointer to some subclasses instead!
-    union {
-        uint32_t u32;
-        icount_decr_u16 u16;
-    } icount_decr;
     uint32_t can_do_io;
     int32_t exception_index;
     uint64_t rr_guest_instr_count;

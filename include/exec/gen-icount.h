@@ -53,7 +53,7 @@ static inline void gen_tb_start(TranslationBlock *tb)
     icount_label = gen_new_label();
     count = tcg_temp_local_new_i32();
     tcg_gen_ld_i32(count, cpu_env,
-                   offsetof(ArchCPU, neg.icount_decr.u32) -
+                   offsetof(ArchCPU, neg.icount_decr_ptr->u32) -
                    offsetof(ArchCPU, env));
 
 
@@ -72,7 +72,7 @@ static inline void gen_tb_start(TranslationBlock *tb)
 
     tcg_gen_brcondi_i32(TCG_COND_LT, count, 0, icount_label);
     tcg_gen_st16_i32(count, cpu_env,
-                         offsetof(ArchCPU, neg.icount_decr.u16.low) -
+                         offsetof(ArchCPU, neg.icount_decr_ptr->u16.low) -
                          offsetof(ArchCPU, env));
         gen_io_end();
 

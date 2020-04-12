@@ -183,7 +183,7 @@ bool mttcg_enabled;
 static int64_t cpu_get_icount_executed(CPUState *cpu)
 {
     return (cpu->icount_budget -
-            (cpu_neg(cpu)->icount_decr.u16.low + cpu->icount_extra));
+            (cpu_neg(cpu)->icount_decr_ptr->u16.low + cpu->icount_extra));
 }
 
 /*
@@ -1383,12 +1383,12 @@ static void prepare_icount_for_run(CPUState *cpu)
          * each vCPU execution. However u16.high can be raised
          * asynchronously by cpu_exit/cpu_interrupt/tcg_handle_interrupt
          */
-        g_assert(cpu_neg(cpu)->icount_decr.u16.low == 0);
+        g_assert(cpu_neg(cpu)->icount_decr_ptr->u16.low == 0);
         g_assert(cpu->icount_extra == 0);
 
         cpu->icount_budget = tcg_get_icount_limit();
         insns_left = MIN(0xffff, cpu->icount_budget);
-        cpu_neg(cpu)->icount_decr.u16.low = insns_left;
+        cpu_neg(cpu)->icount_decr_ptr->u16.low = insns_left;
         cpu->icount_extra = cpu->icount_budget - insns_left;
 
         replay_mutex_lock();
@@ -1402,7 +1402,7 @@ static void process_icount_data(CPUState *cpu)
         cpu_update_icount(cpu);
 
         /* Reset the counters */
-        cpu_neg(cpu)->icount_decr.u16.low = 0;
+        cpu_neg(cpu)->icount_decr_ptr->u16.low = 0;
         cpu->icount_extra = 0;
         cpu->icount_budget = 0;
 
@@ -1427,15 +1427,15 @@ static int tcg_cpu_exec(CPUState *cpu)
     if (use_icount) {
         int64_t count;
         int decr;
-        timers_state.qemu_icount -= (cpu->icount_decr.u16.low
+        timers_state.qemu_icount -= (cpu->icount_decr_ptr->u16.low
                                     + cpu->icount_extra);
-        cpu->icount_decr.u16.low = 0;
+        cpu->icount_decr_ptr->u16.low = 0;
         cpu->icount_extra = 0;
         count = tcg_get_icount_limit();
         timers_state.qemu_icount += count;
         decr = (count > 0xffff) ? 0xffff : count;
         count -= decr;
-        cpu->icount_decr.u16.low = decr;
+        cpu->icount_decr_ptr->u16.low = decr;
         cpu->icount_extra = count;
     }
     cpu_exec_start(cpu);
@@ -1448,9 +1448,9 @@ static int tcg_cpu_exec(CPUState *cpu)
     if (use_icount) {
         /* Fold pending instructions back into the
            instruction counter, and clear the interrupt flag.  */
-        timers_state.qemu_icount -= (cpu->icount_decr.u16.low
+        timers_state.qemu_icount -= (cpu->icount_decr_ptr->u16.low
                         + cpu->icount_extra);
-        cpu->icount_decr.u32 = 0;
+        cpu->icount_decr_ptr->u32 = 0;
         cpu->icount_extra = 0;
         replay_account_executed_instructions();
     }

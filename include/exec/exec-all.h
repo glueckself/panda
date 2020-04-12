@@ -105,7 +105,7 @@ void QEMU_NORETURN cpu_loop_exit_atomic(CPUState *cpu, uintptr_t pc);
  */
 static inline bool cpu_loop_exit_requested(CPUState *cpu)
 {
-    return (int32_t)atomic_read(&cpu_neg(cpu)->icount_decr.u32) < 0;
+    return (int32_t)atomic_read(&cpu_neg(cpu)->icount_decr_ptr->u32) < 0;
 }
 
 #if !defined(CONFIG_USER_ONLY)
