@@ -18,12 +18,14 @@
  */
 
 #include "qemu/osdep.h"
-#include "hw/hw.h"
 #include "hw/sysbus.h"
+#include "migration/vmstate.h"
+#include "qemu/module.h"
 #include "trace.h"
-#include "sysemu/char.h"
+#include "chardev/char-fe.h"
 
 #include "hw/char/lm32_juart.h"
+#include "hw/qdev-properties.h"
 
 enum {
     LM32_JUART_MIN_SAVE_VERSION = 0,
@@ -102,7 +104,7 @@ static int juart_can_rx(void *opaque)
     return !(s->jrx & JRX_FULL);
 }
 
-static void juart_event(void *opaque, int event)
+static void juart_event(void *opaque, QEMUChrEvent event)
 {
 }
 
@@ -119,7 +121,7 @@ static void lm32_juart_realize(DeviceState *dev, Error **errp)
     LM32JuartState *s = LM32_JUART(dev);
 
     qemu_chr_fe_set_handlers(&s->chr, juart_can_rx, juart_rx,
-                             juart_event, s, NULL, true);
+                             juart_event, NULL, s, NULL, true);
 }
 
 static const VMStateDescription vmstate_lm32_juart = {
@@ -144,7 +146,7 @@ static void lm32_juart_class_init(ObjectClass *klass, void *data)
 
     dc->reset = juart_reset;
     dc->vmsd = &vmstate_lm32_juart;
-    dc->props = lm32_juart_properties;
+    device_class_set_props(dc, lm32_juart_properties);
     dc->realize = lm32_juart_realize;
 }
 

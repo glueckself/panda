@@ -1,3 +1,5 @@
+@c AUTOMATICALLY GENERATED, DO NOT MODIFY
+
 @section Section
 
 @subsection Subsection
@@ -76,17 +78,25 @@ Examples:
 
 @deftp {Enum} Enum
 
-@subsection Produces @strong{invalid} texinfo
+
 
 @b{Values:}
 @table @asis
 @item @code{one}
 The @emph{one} @{and only@}
+@*@b{If:} @code{defined(IFONE)}
 @item @code{two}
 Not documented
 @end table
+
+@b{Features:}
+@table @asis
+@item @code{enum-feat}
+Also @emph{one} @{and only@}
+@end table
 @code{two} is undocumented
 
+@b{If:} @code{defined(IFCOND)}
 @end deftp
 
 
@@ -100,7 +110,6 @@ Not documented
 @item @code{base1: Enum}
 the first member
 @end table
-
 
 @end deftp
 
@@ -116,15 +125,22 @@ Another paragraph (but no @code{var}: line)
 @table @asis
 @item @code{var1: string}
 Not documented
+@*@b{If:} @code{defined(IFSTR)}
 @end table
 
+@b{Features:}
+@table @asis
+@item @code{variant1-feat}
+a feature
+@item @code{member-feat}
+a member feature
+@end table
 
 @end deftp
 
 
 
 @deftp {Object} Variant2
-
 
 
 
@@ -140,9 +156,14 @@ Not documented
 @table @asis
 @item The members of @code{Base}
 @item The members of @code{Variant1} when @code{base1} is @t{"one"}
-@item The members of @code{Variant2} when @code{base1} is @t{"two"}
+@item The members of @code{Variant2} when @code{base1} is @t{"two"} (@b{If:} @code{IFTWO})
 @end table
 
+@b{Features:}
+@table @asis
+@item @code{union-feat1}
+a feature
+@end table
 
 @end deftp
 
@@ -157,9 +178,37 @@ Not documented
 @item @code{type}
 One of @t{"one"}, @t{"two"}
 @item @code{data: Variant1} when @code{type} is @t{"one"}
-@item @code{data: Variant2} when @code{type} is @t{"two"}
+@item @code{data: Variant2} when @code{type} is @t{"two"} (@b{If:} @code{IFTWO})
 @end table
 
+@b{Features:}
+@table @asis
+@item @code{union-feat2}
+a feature
+@end table
+
+@end deftp
+
+
+
+@deftp {Alternate} Alternate
+
+
+
+@b{Members:}
+@table @asis
+@item @code{i: int}
+an integer
+@code{b} is undocumented
+@item @code{b: boolean}
+Not documented
+@end table
+
+@b{Features:}
+@table @asis
+@item @code{alt-feat}
+a feature
+@end table
 
 @end deftp
 
@@ -182,6 +231,13 @@ argument
 Not documented
 @end table
 
+@b{Features:}
+@table @asis
+@item @code{cmd-feat1}
+a feature
+@item @code{cmd-feat2}
+another feature
+@end table
 
 @b{Note:}
 @code{arg3} is undocumented
@@ -209,13 +265,11 @@ Duis aute irure dolor
 <- out
 @end example
 
-
 @b{Examples:}
 @example
 - *verbatim*
 - @{braces@}
 @end example
-
 
 @b{Since:}
 2.10
@@ -230,6 +284,14 @@ If you're bored enough to read this, go see a video of boxed cats
 
 @b{Arguments:} the members of @code{Object}
 
+@b{Features:}
+@table @asis
+@item @code{cmd-feat1}
+a feature
+@item @code{cmd-feat2}
+another feature
+@end table
+
 @b{Example:}
 @example
 -> in
@@ -237,7 +299,21 @@ If you're bored enough to read this, go see a video of boxed cats
 <- out
 @end example
 
-
 @end deftypefn
 
+
+
+@deftypefn Event {} EVT-BOXED
+
+
+
+@b{Arguments:} the members of @code{Object}
+
+@b{Features:}
+@table @asis
+@item @code{feat3}
+a feature
+@end table
+
+@end deftypefn
 

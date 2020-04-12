@@ -25,15 +25,17 @@
 
 #include "qemu/osdep.h"
 #include "qapi/error.h"
-#include "qemu-common.h"
+#include "hw/qdev-properties.h"
 #include "hw/usb.h"
-#include "hw/usb/desc.h"
+#include "migration/vmstate.h"
+#include "desc.h"
 #include "net/net.h"
 #include "qemu/error-report.h"
 #include "qemu/queue.h"
 #include "qemu/config-file.h"
 #include "sysemu/sysemu.h"
 #include "qemu/iov.h"
+#include "qemu/module.h"
 #include "qemu/cutils.h"
 
 /*#define TRAFFIC_DEBUG*/
@@ -624,7 +626,7 @@ static const uint32_t oid_supported_list[] =
 struct rndis_response {
     QTAILQ_ENTRY(rndis_response) entries;
     uint32_t length;
-    uint8_t buf[0];
+    uint8_t buf[];
 };
 
 typedef struct USBNetState {
@@ -648,7 +650,7 @@ typedef struct USBNetState {
     char usbstring_mac[13];
     NICState *nic;
     NICConf conf;
-    QTAILQ_HEAD(rndis_resp_head, rndis_response) rndis_resp;
+    QTAILQ_HEAD(, rndis_response) rndis_resp;
 } USBNetState;
 
 #define TYPE_USB_NET "usb-net"
@@ -1340,7 +1342,7 @@ static NetClientInfo net_usbnet_info = {
     .cleanup = usbnet_cleanup,
 };
 
-static void usb_net_realize(USBDevice *dev, Error **errrp)
+static void usb_net_realize(USBDevice *dev, Error **errp)
 {
     USBNetState *s = USB_NET(dev);
 
@@ -1382,31 +1384,6 @@ static void usb_net_instance_init(Object *obj)
                                   &dev->qdev, NULL);
 }
 
-static USBDevice *usb_net_init(USBBus *bus, const char *cmdline)
-{
-    Error *local_err = NULL;
-    USBDevice *dev;
-    QemuOpts *opts;
-    int idx;
-
-    opts = qemu_opts_parse_noisily(qemu_find_opts("net"), cmdline, false);
-    if (!opts) {
-        return NULL;
-    }
-    qemu_opt_set(opts, "type", "nic", &error_abort);
-    qemu_opt_set(opts, "model", "usb", &error_abort);
-
-    idx = net_client_init(opts, false, &local_err);
-    if (local_err) {
-        error_report_err(local_err);
-        return NULL;
-    }
-
-    dev = usb_create(bus, "usb-net");
-    qdev_set_nic_properties(&dev->qdev, &nd_table[idx]);
-    return dev;
-}
-
 static const VMStateDescription vmstate_usb_net = {
     .name = "usb-net",
     .unmigratable = 1,
@@ -1432,7 +1409,7 @@ static void usb_net_class_initfn(ObjectClass *klass, void *data)
     set_bit(DEVICE_CATEGORY_NETWORK, dc->categories);
     dc->fw_name = "network";
     dc->vmsd = &vmstate_usb_net;
-    dc->props = net_properties;
+    device_class_set_props(dc, net_properties);
 }
 
 static const TypeInfo net_info = {
@@ -1446,7 +1423,6 @@ static const TypeInfo net_info = {
 static void usb_net_register_types(void)
 {
     type_register_static(&net_info);
-    usb_legacy_register(TYPE_USB_NET, "net", usb_net_init);
 }
 
 type_init(usb_net_register_types)

@@ -19,7 +19,6 @@
 
 
 #include "cpu.h"
-#include "exec/exec-all.h"
 #include "exec/cpu_ldst.h"
 
 #undef DEBUG_REMAP
@@ -85,6 +84,8 @@ struct emulated_sigtable {
 /* NOTE: we force a big alignment so that the stack stored after is
    aligned too */
 typedef struct TaskState {
+    pid_t ts_tid;     /* tid (or pid) of this task */
+
     struct TaskState *next;
     int used; /* non zero if used */
     struct image_info *info;
@@ -94,7 +95,7 @@ typedef struct TaskState {
     struct sigqueue *first_free; /* first free siginfo queue entry */
     int signal_pending; /* non zero if a signal may be pending */
 
-    uint8_t stack[0];
+    uint8_t stack[];
 } __attribute__((aligned(16))) TaskState;
 
 void init_task_state(TaskState *ts);

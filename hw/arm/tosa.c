@@ -13,19 +13,18 @@
 
 #include "qemu/osdep.h"
 #include "qapi/error.h"
-#include "hw/hw.h"
+#include "sysemu/runstate.h"
 #include "hw/arm/pxa.h"
-#include "hw/arm/arm.h"
-#include "hw/devices.h"
+#include "hw/arm/boot.h"
 #include "hw/arm/sharpsl.h"
 #include "hw/pcmcia.h"
 #include "hw/boards.h"
+#include "hw/display/tc6393xb.h"
 #include "hw/i2c/i2c.h"
+#include "hw/irq.h"
 #include "hw/ssi/ssi.h"
-#include "sysemu/block-backend.h"
 #include "hw/sysbus.h"
 #include "exec/address-spaces.h"
-#include "sysemu/sysemu.h"
 
 #define TOSA_RAM    0x04000000
 #define TOSA_ROM	0x00800000
@@ -90,7 +89,7 @@ static void tosa_out_switch(void *opaque, int line, int level)
 static void tosa_reset(void *opaque, int line, int level)
 {
     if (level) {
-        qemu_system_reset_request();
+        qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);
     }
 }
 
@@ -159,7 +158,7 @@ static int tosa_dac_send(I2CSlave *i2c, uint8_t data)
     s->buf[s->len] = data;
     if (s->len ++ > 2) {
 #ifdef VERBOSE
-        fprintf(stderr, "%s: message too long (%i bytes)\n", __FUNCTION__, s->len);
+        fprintf(stderr, "%s: message too long (%i bytes)\n", __func__, s->len);
 #endif
         return 1;
     }
@@ -181,14 +180,14 @@ static int tosa_dac_event(I2CSlave *i2c, enum i2c_event event)
     case I2C_START_SEND:
         break;
     case I2C_START_RECV:
-        printf("%s: recv not supported!!!\n", __FUNCTION__);
+        printf("%s: recv not supported!!!\n", __func__);
         break;
     case I2C_FINISH:
 #ifdef VERBOSE
         if (s->len < 2)
-            printf("%s: message too short (%i bytes)\n", __FUNCTION__, s->len);
+            printf("%s: message too short (%i bytes)\n", __func__, s->len);
         if (s->len > 2)
-            printf("%s: message too long\n", __FUNCTION__);
+            printf("%s: message too long\n", __func__);
 #endif
         break;
     default:
@@ -198,10 +197,10 @@ static int tosa_dac_event(I2CSlave *i2c, enum i2c_event event)
     return 0;
 }
 
-static int tosa_dac_recv(I2CSlave *s)
+static uint8_t tosa_dac_recv(I2CSlave *s)
 {
-    printf("%s: recv not supported!!!\n", __FUNCTION__);
-    return -1;
+    printf("%s: recv not supported!!!\n", __func__);
+    return 0xff;
 }
 
 static void tosa_tg_init(PXA2xxState *cpu)
@@ -219,24 +218,15 @@ static struct arm_boot_info tosa_binfo = {
 
 static void tosa_init(MachineState *machine)
 {
-    const char *cpu_model = machine->cpu_model;
-    const char *kernel_filename = machine->kernel_filename;
-    const char *kernel_cmdline = machine->kernel_cmdline;
-    const char *initrd_filename = machine->initrd_filename;
     MemoryRegion *address_space_mem = get_system_memory();
     MemoryRegion *rom = g_new(MemoryRegion, 1);
     PXA2xxState *mpu;
     TC6393xbState *tmio;
     DeviceState *scp0, *scp1;
 
-    if (!cpu_model)
-        cpu_model = "pxa255";
-
     mpu = pxa255_init(address_space_mem, tosa_binfo.ram_size);
 
-    memory_region_init_ram(rom, NULL, "tosa.rom", TOSA_ROM, &error_fatal);
-    vmstate_register_ram_global(rom);
-    memory_region_set_readonly(rom, true);
+    memory_region_init_rom(rom, NULL, "tosa.rom", TOSA_ROM, &error_fatal);
     memory_region_add_subregion(address_space_mem, 0, rom);
 
     tmio = tc6393xb_init(address_space_mem, 0x10000000,
@@ -251,11 +241,8 @@ static void tosa_init(MachineState *machine)
 
     tosa_tg_init(mpu);
 
-    tosa_binfo.kernel_filename = kernel_filename;
-    tosa_binfo.kernel_cmdline = kernel_cmdline;
-    tosa_binfo.initrd_filename = initrd_filename;
     tosa_binfo.board_id = 0x208;
-    arm_load_kernel(mpu->cpu, &tosa_binfo);
+    arm_load_kernel(mpu->cpu, machine, &tosa_binfo);
     sl_bootparam_write(SL_PXA_PARAM_BASE);
 }
 
@@ -264,6 +251,7 @@ static void tosapda_machine_init(MachineClass *mc)
     mc->desc = "Sharp SL-6000 (Tosa) PDA (PXA255)";
     mc->init = tosa_init;
     mc->block_default_type = IF_IDE;
+    mc->ignore_memory_transaction_failures = true;
 }
 
 DEFINE_MACHINE("tosa", tosapda_machine_init)

@@ -23,11 +23,14 @@
 
 
 #include "qemu/osdep.h"
-#include "hw/hw.h"
+#include "hw/irq.h"
+#include "hw/qdev-properties.h"
 #include "hw/sysbus.h"
+#include "migration/vmstate.h"
 #include "trace.h"
-#include "sysemu/char.h"
+#include "chardev/char-fe.h"
 #include "qemu/error-report.h"
+#include "qemu/module.h"
 
 enum {
     R_RXTX = 0,
@@ -232,7 +235,7 @@ static int uart_can_rx(void *opaque)
     return !(s->regs[R_LSR] & LSR_DR);
 }
 
-static void uart_event(void *opaque, int event)
+static void uart_event(void *opaque, QEMUChrEvent event)
 {
 }
 
@@ -266,7 +269,7 @@ static void lm32_uart_realize(DeviceState *dev, Error **errp)
     LM32UartState *s = LM32_UART(dev);
 
     qemu_chr_fe_set_handlers(&s->chr, uart_can_rx, uart_rx,
-                             uart_event, s, NULL, true);
+                             uart_event, NULL, s, NULL, true);
 }
 
 static const VMStateDescription vmstate_lm32_uart = {
@@ -290,7 +293,7 @@ static void lm32_uart_class_init(ObjectClass *klass, void *data)
 
     dc->reset = uart_reset;
     dc->vmsd = &vmstate_lm32_uart;
-    dc->props = lm32_uart_properties;
+    device_class_set_props(dc, lm32_uart_properties);
     dc->realize = lm32_uart_realize;
 }
 

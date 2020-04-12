@@ -34,11 +34,12 @@
 */
 
 #include "qemu/osdep.h"
-#include "sysemu/sysemu.h"
 #include "net/net.h"
 #include "net/tap.h"
+#include "hw/hw.h"
 #include "hw/pci/msi.h"
 #include "hw/pci/msix.h"
+#include "sysemu/runstate.h"
 
 #include "net_tx_pkt.h"
 #include "net_rx_pkt.h"
@@ -581,7 +582,7 @@ e1000e_rss_calc_hash(E1000ECore *core,
         type = NetPktRssIpV4Tcp;
         break;
     case E1000_MRQ_RSS_TYPE_IPV6TCP:
-        type = NetPktRssIpV6Tcp;
+        type = NetPktRssIpV6TcpEx;
         break;
     case E1000_MRQ_RSS_TYPE_IPV6:
         type = NetPktRssIpV6;
@@ -632,18 +633,18 @@ e1000e_rss_parse_packet(E1000ECore *core,
 static void
 e1000e_setup_tx_offloads(E1000ECore *core, struct e1000e_tx *tx)
 {
-    if (tx->props.tse && tx->props.cptse) {
+    if (tx->props.tse && tx->cptse) {
         net_tx_pkt_build_vheader(tx->tx_pkt, true, true, tx->props.mss);
         net_tx_pkt_update_ip_checksums(tx->tx_pkt);
         e1000x_inc_reg_if_not_full(core->mac, TSCTC);
         return;
     }
 
-    if (tx->props.sum_needed & E1000_TXD_POPTS_TXSM) {
+    if (tx->sum_needed & E1000_TXD_POPTS_TXSM) {
         net_tx_pkt_build_vheader(tx->tx_pkt, false, true, 0);
     }
 
-    if (tx->props.sum_needed & E1000_TXD_POPTS_IXSM) {
+    if (tx->sum_needed & E1000_TXD_POPTS_IXSM) {
         net_tx_pkt_update_ip_hdr_checksum(tx->tx_pkt);
     }
 }
@@ -715,13 +716,13 @@ e1000e_process_tx_desc(E1000ECore *core,
         return;
     } else if (dtype == (E1000_TXD_CMD_DEXT | E1000_TXD_DTYP_D)) {
         /* data descriptor */
-        tx->props.sum_needed = le32_to_cpu(dp->upper.data) >> 8;
-        tx->props.cptse = (txd_lower & E1000_TXD_CMD_TSE) ? 1 : 0;
+        tx->sum_needed = le32_to_cpu(dp->upper.data) >> 8;
+        tx->cptse = (txd_lower & E1000_TXD_CMD_TSE) ? 1 : 0;
         e1000e_process_ts_option(core, dp);
     } else {
         /* legacy descriptor */
         e1000e_process_ts_option(core, dp);
-        tx->props.cptse = 0;
+        tx->cptse = 0;
     }
 
     addr = le64_to_cpu(dp->buffer_addr);
@@ -747,8 +748,8 @@ e1000e_process_tx_desc(E1000ECore *core,
         tx->skip_cp = false;
         net_tx_pkt_reset(tx->tx_pkt);
 
-        tx->props.sum_needed = 0;
-        tx->props.cptse = 0;
+        tx->sum_needed = 0;
+        tx->cptse = 0;
     }
 }
 
@@ -2022,11 +2023,8 @@ e1000e_msix_notify_one(E1000ECore *core, uint32_t cause, uint32_t int_cfg)
 
     effective_eiac = core->mac[EIAC] & cause;
 
-    if (effective_eiac == E1000_ICR_OTHER) {
-        effective_eiac |= E1000_ICR_OTHER_CAUSES;
-    }
-
     core->mac[ICR] &= ~effective_eiac;
+    core->msi_causes_pending &= ~effective_eiac;
 
     if (!(core->mac[CTRL_EXT] & E1000_CTRL_EXT_IAME)) {
         core->mac[IMS] &= ~effective_eiac;
@@ -2123,6 +2121,13 @@ e1000e_send_msi(E1000ECore *core, bool msix)
 {
     uint32_t causes = core->mac[ICR] & core->mac[IMS] & ~E1000_ICR_ASSERTED;
 
+    core->msi_causes_pending &= causes;
+    causes ^= core->msi_causes_pending;
+    if (causes == 0) {
+        return;
+    }
+    core->msi_causes_pending |= causes;
+
     if (msix) {
         e1000e_msix_notify(core, causes);
     } else {
@@ -2160,6 +2165,9 @@ e1000e_update_interrupt_state(E1000ECore *core)
     core->mac[ICS] = core->mac[ICR];
 
     interrupts_pending = (core->mac[IMS] & core->mac[ICR]) ? true : false;
+    if (!interrupts_pending) {
+        core->msi_causes_pending = 0;
+    }
 
     trace_e1000e_irq_pending_interrupts(core->mac[ICR] & core->mac[IMS],
                                         core->mac[ICR], core->mac[IMS]);
@@ -2805,12 +2813,15 @@ e1000e_set_eitr(E1000ECore *core, int index, uint32_t val)
 static void
 e1000e_set_psrctl(E1000ECore *core, int index, uint32_t val)
 {
-    if ((val & E1000_PSRCTL_BSIZE0_MASK) == 0) {
-        hw_error("e1000e: PSRCTL.BSIZE0 cannot be zero");
-    }
+    if (core->mac[RCTL] & E1000_RCTL_DTYP_MASK) {
 
-    if ((val & E1000_PSRCTL_BSIZE1_MASK) == 0) {
-        hw_error("e1000e: PSRCTL.BSIZE1 cannot be zero");
+        if ((val & E1000_PSRCTL_BSIZE0_MASK) == 0) {
+            hw_error("e1000e: PSRCTL.BSIZE0 cannot be zero");
+        }
+
+        if ((val & E1000_PSRCTL_BSIZE1_MASK) == 0) {
+            hw_error("e1000e: PSRCTL.BSIZE1 cannot be zero");
+        }
     }
 
     core->mac[PSRCTL] = val;
@@ -2844,7 +2855,8 @@ e1000e_set_gcr(E1000ECore *core, int index, uint32_t val)
 }
 
 #define e1000e_getreg(x)    [x] = e1000e_mac_readreg
-static uint32_t (*e1000e_macreg_readops[])(E1000ECore *, int) = {
+typedef uint32_t (*readops)(E1000ECore *, int);
+static const readops e1000e_macreg_readops[] = {
     e1000e_getreg(PBA),
     e1000e_getreg(WUFC),
     e1000e_getreg(MANC),
@@ -2855,7 +2867,7 @@ static uint32_t (*e1000e_macreg_readops[])(E1000ECore *, int) = {
     e1000e_getreg(RDLEN0),
     e1000e_getreg(RDH1),
     e1000e_getreg(LATECOL),
-    e1000e_getreg(SEC),
+    e1000e_getreg(SEQEC),
     e1000e_getreg(XONTXC),
     e1000e_getreg(WUS),
     e1000e_getreg(GORCL),
@@ -3050,7 +3062,8 @@ static uint32_t (*e1000e_macreg_readops[])(E1000ECore *, int) = {
 enum { E1000E_NREADOPS = ARRAY_SIZE(e1000e_macreg_readops) };
 
 #define e1000e_putreg(x)    [x] = e1000e_mac_writereg
-static void (*e1000e_macreg_writeops[])(E1000ECore *, int, uint32_t) = {
+typedef void (*writeops)(E1000ECore *, int, uint32_t);
+static const writeops e1000e_macreg_writeops[] = {
     e1000e_putreg(PBA),
     e1000e_putreg(SWSM),
     e1000e_putreg(WUFC),

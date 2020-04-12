@@ -13,16 +13,16 @@
 #include "sysemu/blockdev.h"
 #include "sysemu/block-backend.h"
 #include "hw/block/block.h"
-#include "qapi/qmp/qerror.h"
-#include "sysemu/sysemu.h"
-#include "qmp-commands.h"
+#include "qapi/error.h"
+#include "qapi/qapi-commands-block.h"
 #include "block/nbd.h"
 #include "io/channel-socket.h"
+#include "io/net-listener.h"
 
 typedef struct NBDServerData {
-    QIOChannelSocket *listen_ioc;
-    int watch;
+    QIONetListener *listener;
     QCryptoTLSCreds *tlscreds;
+    char *tlsauthz;
 } NBDServerData;
 
 static NBDServerData *nbd_server;
@@ -32,27 +32,12 @@ static void nbd_blockdev_client_closed(NBDClient *client, bool ignored)
     nbd_client_put(client);
 }
 
-static gboolean nbd_accept(QIOChannel *ioc, GIOCondition condition,
-                           gpointer opaque)
+static void nbd_accept(QIONetListener *listener, QIOChannelSocket *cioc,
+                       gpointer opaque)
 {
-    QIOChannelSocket *cioc;
-
-    if (!nbd_server) {
-        return FALSE;
-    }
-
-    cioc = qio_channel_socket_accept(QIO_CHANNEL_SOCKET(ioc),
-                                     NULL);
-    if (!cioc) {
-        return TRUE;
-    }
-
     qio_channel_set_name(QIO_CHANNEL(cioc), "nbd-server");
-    nbd_client_new(NULL, cioc,
-                   nbd_server->tlscreds, NULL,
+    nbd_client_new(cioc, nbd_server->tlscreds, nbd_server->tlsauthz,
                    nbd_blockdev_client_closed);
-    object_unref(OBJECT(cioc));
-    return TRUE;
 }
 
 
@@ -62,13 +47,12 @@ static void nbd_server_free(NBDServerData *server)
         return;
     }
 
-    if (server->watch != -1) {
-        g_source_remove(server->watch);
-    }
-    object_unref(OBJECT(server->listen_ioc));
+    qio_net_listener_disconnect(server->listener);
+    object_unref(OBJECT(server->listener));
     if (server->tlscreds) {
         object_unref(OBJECT(server->tlscreds));
     }
+    g_free(server->tlsauthz);
 
     g_free(server);
 }
@@ -103,9 +87,8 @@ static QCryptoTLSCreds *nbd_get_tls_creds(const char *id, Error **errp)
 }
 
 
-void qmp_nbd_server_start(SocketAddress *addr,
-                          bool has_tls_creds, const char *tls_creds,
-                          Error **errp)
+void nbd_server_start(SocketAddress *addr, const char *tls_creds,
+                      const char *tls_authz, Error **errp)
 {
     if (nbd_server) {
         error_setg(errp, "NBD server already running");
@@ -113,34 +96,34 @@ void qmp_nbd_server_start(SocketAddress *addr,
     }
 
     nbd_server = g_new0(NBDServerData, 1);
-    nbd_server->watch = -1;
-    nbd_server->listen_ioc = qio_channel_socket_new();
-    qio_channel_set_name(QIO_CHANNEL(nbd_server->listen_ioc),
-                         "nbd-listener");
-    if (qio_channel_socket_listen_sync(
-            nbd_server->listen_ioc, addr, errp) < 0) {
+    nbd_server->listener = qio_net_listener_new();
+
+    qio_net_listener_set_name(nbd_server->listener,
+                              "nbd-listener");
+
+    if (qio_net_listener_open_sync(nbd_server->listener, addr, 1, errp) < 0) {
         goto error;
     }
 
-    if (has_tls_creds) {
+    if (tls_creds) {
         nbd_server->tlscreds = nbd_get_tls_creds(tls_creds, errp);
         if (!nbd_server->tlscreds) {
             goto error;
         }
 
-        /* TODO SOCKET_ADDRESS_KIND_FD where fd has AF_INET or AF_INET6 */
-        if (addr->type != SOCKET_ADDRESS_KIND_INET) {
+        /* TODO SOCKET_ADDRESS_TYPE_FD where fd has AF_INET or AF_INET6 */
+        if (addr->type != SOCKET_ADDRESS_TYPE_INET) {
             error_setg(errp, "TLS is only supported with IPv4/IPv6");
             goto error;
         }
     }
 
-    nbd_server->watch = qio_channel_add_watch(
-        QIO_CHANNEL(nbd_server->listen_ioc),
-        G_IO_IN,
-        nbd_accept,
-        NULL,
-        NULL);
+    nbd_server->tlsauthz = g_strdup(tls_authz);
+
+    qio_net_listener_set_client_func(nbd_server->listener,
+                                     nbd_accept,
+                                     NULL,
+                                     NULL);
 
     return;
 
@@ -149,53 +132,128 @@ void qmp_nbd_server_start(SocketAddress *addr,
     nbd_server = NULL;
 }
 
-void qmp_nbd_server_add(const char *device, bool has_writable, bool writable,
-                        Error **errp)
+void nbd_server_start_options(NbdServerOptions *arg, Error **errp)
+{
+    nbd_server_start(arg->addr, arg->tls_creds, arg->tls_authz, errp);
+}
+
+void qmp_nbd_server_start(SocketAddressLegacy *addr,
+                          bool has_tls_creds, const char *tls_creds,
+                          bool has_tls_authz, const char *tls_authz,
+                          Error **errp)
+{
+    SocketAddress *addr_flat = socket_address_flatten(addr);
+
+    nbd_server_start(addr_flat, tls_creds, tls_authz, errp);
+    qapi_free_SocketAddress(addr_flat);
+}
+
+void qmp_nbd_server_add(BlockExportNbd *arg, Error **errp)
 {
     BlockDriverState *bs = NULL;
     BlockBackend *on_eject_blk;
     NBDExport *exp;
+    int64_t len;
+    AioContext *aio_context;
 
     if (!nbd_server) {
         error_setg(errp, "NBD server not running");
         return;
     }
 
-    if (nbd_export_find(device)) {
-        error_setg(errp, "NBD server already exporting device '%s'", device);
+    if (!arg->has_name) {
+        arg->name = arg->device;
+    }
+
+    if (strlen(arg->name) > NBD_MAX_STRING_SIZE) {
+        error_setg(errp, "export name '%s' too long", arg->name);
         return;
     }
 
-    on_eject_blk = blk_by_name(device);
+    if (arg->description && strlen(arg->description) > NBD_MAX_STRING_SIZE) {
+        error_setg(errp, "description '%s' too long", arg->description);
+        return;
+    }
 
-    bs = bdrv_lookup_bs(device, device, errp);
+    if (nbd_export_find(arg->name)) {
+        error_setg(errp, "NBD server already has export named '%s'", arg->name);
+        return;
+    }
+
+    on_eject_blk = blk_by_name(arg->device);
+
+    bs = bdrv_lookup_bs(arg->device, arg->device, errp);
     if (!bs) {
         return;
     }
 
-    if (!has_writable) {
-        writable = false;
+    aio_context = bdrv_get_aio_context(bs);
+    aio_context_acquire(aio_context);
+    len = bdrv_getlength(bs);
+    if (len < 0) {
+        error_setg_errno(errp, -len,
+                         "Failed to determine the NBD export's length");
+        goto out;
+    }
+
+    if (!arg->has_writable) {
+        arg->writable = false;
     }
     if (bdrv_is_read_only(bs)) {
-        writable = false;
+        arg->writable = false;
     }
 
-    exp = nbd_export_new(bs, 0, -1, writable ? 0 : NBD_FLAG_READ_ONLY,
+    exp = nbd_export_new(bs, 0, len, arg->name, arg->description, arg->bitmap,
+                         !arg->writable, !arg->writable,
                          NULL, false, on_eject_blk, errp);
     if (!exp) {
-        return;
+        goto out;
     }
-
-    nbd_export_set_name(exp, device);
 
     /* The list of named exports has a strong reference to this export now and
      * our only way of accessing it is through nbd_export_find(), so we can drop
      * the strong reference that is @exp. */
     nbd_export_put(exp);
+
+ out:
+    aio_context_release(aio_context);
+}
+
+void qmp_nbd_server_remove(const char *name,
+                           bool has_mode, NbdServerRemoveMode mode,
+                           Error **errp)
+{
+    NBDExport *exp;
+    AioContext *aio_context;
+
+    if (!nbd_server) {
+        error_setg(errp, "NBD server not running");
+        return;
+    }
+
+    exp = nbd_export_find(name);
+    if (exp == NULL) {
+        error_setg(errp, "Export '%s' is not found", name);
+        return;
+    }
+
+    if (!has_mode) {
+        mode = NBD_SERVER_REMOVE_MODE_SAFE;
+    }
+
+    aio_context = nbd_export_aio_context(exp);
+    aio_context_acquire(aio_context);
+    nbd_export_remove(exp, mode, errp);
+    aio_context_release(aio_context);
 }
 
 void qmp_nbd_server_stop(Error **errp)
 {
+    if (!nbd_server) {
+        error_setg(errp, "NBD server not running");
+        return;
+    }
+
     nbd_export_close_all();
 
     nbd_server_free(nbd_server);

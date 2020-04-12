@@ -10,7 +10,6 @@
 #ifndef TRACE__CONTROL_H
 #define TRACE__CONTROL_H
 
-#include "qemu-common.h"
 #include "event-internal.h"
 
 typedef struct TraceEventIter {
@@ -96,7 +95,7 @@ static const char * trace_event_get_name(TraceEvent *ev);
  * trace_event_get_state:
  * @id: Event identifier name.
  *
- * Get the tracing state of an event (both static and dynamic).
+ * Get the tracing state of an event, both static and the QEMU dynamic state.
  *
  * If the event has the disabled property, the check will have no performance
  * impact.
@@ -105,20 +104,20 @@ static const char * trace_event_get_name(TraceEvent *ev);
     ((id ##_ENABLED) && trace_event_get_state_dynamic_by_id(id))
 
 /**
- * trace_event_get_vcpu_state:
- * @vcpu: Target vCPU.
+ * trace_event_get_state_backends:
  * @id: Event identifier name.
  *
- * Get the tracing state of an event (both static and dynamic) for the given
- * vCPU.
+ * Get the tracing state of an event, both static and dynamic state from all
+ * compiled-in backends.
  *
  * If the event has the disabled property, the check will have no performance
  * impact.
+ *
+ * Returns: true if at least one backend has the event enabled and the event
+ * does not have the disabled property.
  */
-#define trace_event_get_vcpu_state(vcpu, id)                            \
-    ((id ##_ENABLED) &&                                                 \
-     trace_event_get_vcpu_state_dynamic_by_vcpu_id(                     \
-         vcpu, _ ## id ## _EVENT.vcpu_id))
+#define trace_event_get_state_backends(id)              \
+    ((id ##_ENABLED) && id ##_BACKEND_DSTATE())
 
 /**
  * trace_event_get_state_static:
@@ -141,14 +140,6 @@ static bool trace_event_get_state_static(TraceEvent *ev);
 static bool trace_event_get_state_dynamic(TraceEvent *ev);
 
 /**
- * trace_event_get_vcpu_state_dynamic:
- *
- * Get the dynamic tracing state of an event for the given vCPU.
- */
-static bool trace_event_get_vcpu_state_dynamic(CPUState *vcpu, TraceEvent *ev);
-
-
-/**
  * trace_event_set_state_dynamic:
  *
  * Set the dynamic tracing state of an event.
@@ -165,6 +156,9 @@ void trace_event_set_state_dynamic(TraceEvent *ev, bool state);
  * Set the dynamic tracing state of an event for the given vCPU.
  *
  * Pre-condition: trace_event_get_vcpu_state_static(ev) == true
+ *
+ * Note: Changes for execution-time events with the 'tcg' property will not be
+ *       propagated until the next TB is executed (iff executing in TCG mode).
  */
 void trace_event_set_vcpu_state_dynamic(CPUState *vcpu,
                                         TraceEvent *ev, bool state);
@@ -174,7 +168,7 @@ void trace_event_set_vcpu_state_dynamic(CPUState *vcpu,
 /**
  * trace_init_backends:
  * @file:   Name of trace output file; may be NULL.
- *          Corresponds to commandline option "-trace file=...".
+ *          Corresponds to commandline option "--trace file=...".
  *
  * Initialize the tracing backend.
  *
@@ -185,7 +179,7 @@ bool trace_init_backends(void);
 /**
  * trace_init_file:
  * @file:   Name of trace output file; may be NULL.
- *          Corresponds to commandline option "-trace file=...".
+ *          Corresponds to commandline option "--trace file=...".
  *
  * Record the name of the output file for the tracing backend.
  * Exits if no selected backend does not support specifying the
@@ -248,6 +242,6 @@ char *trace_opt_parse(const char *optarg);
 uint32_t trace_get_vcpu_event_count(void);
 
 
-#include "trace/control-internal.h"
+#include "control-internal.h"
 
 #endif /* TRACE__CONTROL_H */

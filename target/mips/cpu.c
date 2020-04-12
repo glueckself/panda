@@ -21,8 +21,9 @@
 #include "qemu/osdep.h"
 #include "qapi/error.h"
 #include "cpu.h"
+#include "internal.h"
 #include "kvm_mips.h"
-#include "qemu-common.h"
+#include "qemu/module.h"
 #include "sysemu/kvm.h"
 #include "exec/exec-all.h"
 
@@ -56,9 +57,11 @@ static bool mips_cpu_has_work(CPUState *cs)
     CPUMIPSState *env = &cpu->env;
     bool has_work = false;
 
-    /* Prior to MIPS Release 6 it is implementation dependent if non-enabled
-       interrupts wake-up the CPU, however most of the implementations only
-       check for interrupts that can be taken. */
+    /*
+     * Prior to MIPS Release 6 it is implementation dependent if non-enabled
+     * interrupts wake-up the CPU, however most of the implementations only
+     * check for interrupts that can be taken.
+     */
     if ((cs->interrupt_request & CPU_INTERRUPT_HARD) &&
         cpu_mips_hw_interrupts_pending(env)) {
         if (cpu_mips_hw_interrupts_enabled(env) ||
@@ -69,8 +72,10 @@ static bool mips_cpu_has_work(CPUState *cs)
 
     /* MIPS-MT has the ability to halt the CPU.  */
     if (env->CP0_Config3 & (1 << CP0C3_MT)) {
-        /* The QEMU model will issue an _WAKE request whenever the CPUs
-           should be woken up.  */
+        /*
+         * The QEMU model will issue an _WAKE request whenever the CPUs
+         * should be woken up.
+         */
         if (cs->interrupt_request & CPU_INTERRUPT_WAKE) {
             has_work = true;
         }
@@ -91,14 +96,14 @@ static bool mips_cpu_has_work(CPUState *cs)
     return has_work;
 }
 
-/* CPUClass::reset() */
-static void mips_cpu_reset(CPUState *s)
+static void mips_cpu_reset(DeviceState *dev)
 {
+    CPUState *s = CPU(dev);
     MIPSCPU *cpu = MIPS_CPU(s);
     MIPSCPUClass *mcc = MIPS_CPU_GET_CLASS(cpu);
     CPUMIPSState *env = &cpu->env;
 
-    mcc->parent_reset(s);
+    mcc->parent_reset(dev);
 
     memset(env, 0, offsetof(CPUMIPSState, end_reset_fields));
 
@@ -111,17 +116,28 @@ static void mips_cpu_reset(CPUState *s)
 #endif
 }
 
-static void mips_cpu_disas_set_info(CPUState *s, disassemble_info *info) {
+static void mips_cpu_disas_set_info(CPUState *s, disassemble_info *info)
+{
+    MIPSCPU *cpu = MIPS_CPU(s);
+    CPUMIPSState *env = &cpu->env;
+
+    if (!(env->insn_flags & ISA_NANOMIPS32)) {
 #ifdef TARGET_WORDS_BIGENDIAN
-    info->print_insn = print_insn_big_mips;
+        info->print_insn = print_insn_big_mips;
 #else
-    info->print_insn = print_insn_little_mips;
+        info->print_insn = print_insn_little_mips;
 #endif
+    } else {
+#if defined(CONFIG_NANOMIPS_DIS)
+        info->print_insn = print_insn_nanomips;
+#endif
+    }
 }
 
 static void mips_cpu_realizefn(DeviceState *dev, Error **errp)
 {
     CPUState *cs = CPU(dev);
+    MIPSCPU *cpu = MIPS_CPU(dev);
     MIPSCPUClass *mcc = MIPS_CPU_GET_CLASS(dev);
     Error *local_err = NULL;
 
@@ -131,6 +147,8 @@ static void mips_cpu_realizefn(DeviceState *dev, Error **errp)
         return;
     }
 
+    cpu_mips_realize_env(&cpu->env);
+
     cpu_reset(cs);
     qemu_init_vcpu(cs);
 
@@ -139,15 +157,28 @@ static void mips_cpu_realizefn(DeviceState *dev, Error **errp)
 
 static void mips_cpu_initfn(Object *obj)
 {
-    CPUState *cs = CPU(obj);
     MIPSCPU *cpu = MIPS_CPU(obj);
     CPUMIPSState *env = &cpu->env;
+    MIPSCPUClass *mcc = MIPS_CPU_GET_CLASS(obj);
 
-    cs->env_ptr = env;
+    cpu_set_cpustate_pointers(cpu);
+    env->cpu_model = mcc->cpu_def;
+}
 
-    if (tcg_enabled()) {
-        mips_tcg_init();
-    }
+static char *mips_cpu_type_name(const char *cpu_model)
+{
+    return g_strdup_printf(MIPS_CPU_TYPE_NAME("%s"), cpu_model);
+}
+
+static ObjectClass *mips_cpu_class_by_name(const char *cpu_model)
+{
+    ObjectClass *oc;
+    char *typename;
+
+    typename = mips_cpu_type_name(cpu_model);
+    oc = object_class_by_name(typename);
+    g_free(typename);
+    return oc;
 }
 
 static void mips_cpu_class_init(ObjectClass *c, void *data)
@@ -156,12 +187,11 @@ static void mips_cpu_class_init(ObjectClass *c, void *data)
     CPUClass *cc = CPU_CLASS(c);
     DeviceClass *dc = DEVICE_CLASS(c);
 
-    mcc->parent_realize = dc->realize;
-    dc->realize = mips_cpu_realizefn;
+    device_class_set_parent_realize(dc, mips_cpu_realizefn,
+                                    &mcc->parent_realize);
+    device_class_set_parent_reset(dc, mips_cpu_reset, &mcc->parent_reset);
 
-    mcc->parent_reset = cc->reset;
-    cc->reset = mips_cpu_reset;
-
+    cc->class_by_name = mips_cpu_class_by_name;
     cc->has_work = mips_cpu_has_work;
     cc->do_interrupt = mips_cpu_do_interrupt;
     cc->cpu_exec_interrupt = mips_cpu_exec_interrupt;
@@ -170,15 +200,17 @@ static void mips_cpu_class_init(ObjectClass *c, void *data)
     cc->synchronize_from_tb = mips_cpu_synchronize_from_tb;
     cc->gdb_read_register = mips_cpu_gdb_read_register;
     cc->gdb_write_register = mips_cpu_gdb_write_register;
-#ifdef CONFIG_USER_ONLY
-    cc->handle_mmu_fault = mips_cpu_handle_mmu_fault;
-#else
-    cc->do_unassigned_access = mips_cpu_unassigned_access;
+#ifndef CONFIG_USER_ONLY
+    cc->do_transaction_failed = mips_cpu_do_transaction_failed;
     cc->do_unaligned_access = mips_cpu_do_unaligned_access;
     cc->get_phys_page_debug = mips_cpu_get_phys_page_debug;
     cc->vmsd = &vmstate_mips_cpu;
 #endif
     cc->disas_set_info = mips_cpu_disas_set_info;
+#ifdef CONFIG_TCG
+    cc->tcg_initialize = mips_tcg_init;
+    cc->tlb_fill = mips_cpu_tlb_fill;
+#endif
 
     cc->gdb_num_core_regs = 73;
     cc->gdb_stop_before_watchpoint = true;
@@ -189,14 +221,39 @@ static const TypeInfo mips_cpu_type_info = {
     .parent = TYPE_CPU,
     .instance_size = sizeof(MIPSCPU),
     .instance_init = mips_cpu_initfn,
-    .abstract = false,
+    .abstract = true,
     .class_size = sizeof(MIPSCPUClass),
     .class_init = mips_cpu_class_init,
 };
 
+static void mips_cpu_cpudef_class_init(ObjectClass *oc, void *data)
+{
+    MIPSCPUClass *mcc = MIPS_CPU_CLASS(oc);
+    mcc->cpu_def = data;
+}
+
+static void mips_register_cpudef_type(const struct mips_def_t *def)
+{
+    char *typename = mips_cpu_type_name(def->name);
+    TypeInfo ti = {
+        .name = typename,
+        .parent = TYPE_MIPS_CPU,
+        .class_init = mips_cpu_cpudef_class_init,
+        .class_data = (void *)def,
+    };
+
+    type_register(&ti);
+    g_free(typename);
+}
+
 static void mips_cpu_register_types(void)
 {
+    int i;
+
     type_register_static(&mips_cpu_type_info);
+    for (i = 0; i < mips_defs_number; i++) {
+        mips_register_cpudef_type(&mips_defs[i]);
+    }
 }
 
 type_init(mips_cpu_register_types)

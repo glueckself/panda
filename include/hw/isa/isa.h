@@ -5,7 +5,7 @@
 
 #include "exec/memory.h"
 #include "exec/ioport.h"
-#include "hw/qdev.h"
+#include "hw/qdev-core.h"
 
 #define ISA_NUM_IRQS 16
 
@@ -29,7 +29,7 @@ static inline uint16_t applesmc_port(void)
     Object *obj = object_resolve_path_type("", TYPE_APPLE_SMC, NULL);
 
     if (obj) {
-        return object_property_get_int(obj, APPLESMC_PROP_IO_BASE, NULL);
+        return object_property_get_uint(obj, APPLESMC_PROP_IO_BASE, NULL);
     }
     return 0;
 }
@@ -42,10 +42,6 @@ static inline uint16_t applesmc_port(void)
     OBJECT_GET_CLASS(IsaDmaClass, (obj), TYPE_ISADMA)
 #define ISADMA(obj) \
     INTERFACE_CHECK(IsaDma, (obj), TYPE_ISADMA)
-
-struct IsaDma {
-    Object parent;
-};
 
 typedef enum {
     ISADMA_TRANSFER_VERIFY,
@@ -92,7 +88,7 @@ struct ISADevice {
     DeviceState parent_obj;
     /*< public >*/
 
-    uint32_t isairq[2];
+    int8_t isairq[2];      /* -1 = unassigned */
     int nirqs;
     int ioport_id;
 };
@@ -100,9 +96,9 @@ struct ISADevice {
 ISABus *isa_bus_new(DeviceState *dev, MemoryRegion *address_space,
                     MemoryRegion *address_space_io, Error **errp);
 void isa_bus_irqs(ISABus *bus, qemu_irq *irqs);
-qemu_irq isa_get_irq(ISADevice *dev, int isairq);
-void isa_init_irq(ISADevice *dev, qemu_irq *p, int isairq);
-void isa_connect_gpio_out(ISADevice *isadev, int gpioirq, int isairq);
+qemu_irq isa_get_irq(ISADevice *dev, unsigned isairq);
+void isa_init_irq(ISADevice *dev, qemu_irq *p, unsigned isairq);
+void isa_connect_gpio_out(ISADevice *isadev, int gpioirq, unsigned isairq);
 void isa_bus_dma(ISABus *bus, IsaDma *dma8, IsaDma *dma16);
 IsaDma *isa_get_dma(ISABus *bus, int nchan);
 MemoryRegion *isa_address_space(ISADevice *dev);
@@ -151,6 +147,6 @@ static inline ISABus *isa_bus_from_device(ISADevice *d)
     return ISA_BUS(qdev_get_parent_bus(DEVICE(d)));
 }
 
-/* i8257.c */
-void DMA_init(ISABus *bus, int high_page_enable);
+#define TYPE_PIIX4_PCI_DEVICE "piix4-isa"
+
 #endif

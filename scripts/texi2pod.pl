@@ -1,4 +1,4 @@
-#! /usr/bin/perl -w
+#! /usr/bin/env perl
 
 #   Copyright (C) 1999, 2000, 2001, 2003 Free Software Foundation, Inc.
 
@@ -21,6 +21,8 @@
 # This does trivial (and I mean _trivial_) conversion of Texinfo
 # markup to Perl POD format.  It's intended to be used to extract
 # something suitable for a manpage from a Texinfo document.
+
+use warnings;
 
 $output = 0;
 $skipping = 0;
@@ -141,6 +143,24 @@ while(<$inf>) {
 	next;
     };
 
+    # Single line command handlers.
+
+    /^\@include\s+(.+)$/ and do {
+	push @instack, $inf;
+	$inf = gensym();
+	$file = postprocess($1);
+
+	# Try cwd and $ibase, then explicit -I paths.
+	$done = 0;
+	foreach $path ("", $ibase, @ipath) {
+	    $mypath = $file;
+	    $mypath = $path . "/" . $mypath if ($path ne "");
+	    open($inf, "<" . $mypath) and ($done = 1, last);
+	}
+	die "cannot find $file" if !$done;
+	next;
+    };
+
     next unless $output;
 
     # Discard comments.  (Can't do it above, because then we'd never see
@@ -239,24 +259,6 @@ while(<$inf>) {
 	s/</&LT;/g;
 	s/>/&GT;/g;
     }
-
-    # Single line command handlers.
-
-    /^\@include\s+(.+)$/ and do {
-	push @instack, $inf;
-	$inf = gensym();
-	$file = postprocess($1);
-
-	# Try cwd and $ibase, then explicit -I paths.
-	$done = 0;
-	foreach $path ("", $ibase, @ipath) {
-	    $mypath = $file;
-	    $mypath = $path . "/" . $mypath if ($path ne "");
-	    open($inf, "<" . $mypath) and ($done = 1, last);
-	}
-	die "cannot find $file" if !$done;
-	next;
-    };
 
     /^\@(?:section|unnumbered|unnumberedsec|center)\s+(.+)$/
 	and $_ = "\n=head2 $1\n";
@@ -396,7 +398,7 @@ $sects{NAME} = "$fn \- $tl\n";
 $sects{FOOTNOTES} .= "=back\n" if exists $sects{FOOTNOTES};
 
 for $sect (qw(NAME SYNOPSIS DESCRIPTION OPTIONS ENVIRONMENT FILES
-	      BUGS NOTES FOOTNOTES SEEALSO AUTHOR COPYRIGHT)) {
+	      BUGS NOTES FOOTNOTES EXAMPLES SEEALSO AUTHOR COPYRIGHT)) {
     if(exists $sects{$sect}) {
 	$head = $sect;
 	$head =~ s/SEEALSO/SEE ALSO/;

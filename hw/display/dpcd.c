@@ -28,7 +28,9 @@
 
 #include "qemu/osdep.h"
 #include "qemu/log.h"
+#include "qemu/module.h"
 #include "hw/misc/auxbus.h"
+#include "migration/vmstate.h"
 #include "hw/display/dpcd.h"
 
 #ifndef DEBUG_DPCD
@@ -39,7 +41,7 @@
     if (DEBUG_DPCD) {                                                          \
         qemu_log("dpcd: " fmt, ## __VA_ARGS__);                                \
     }                                                                          \
-} while (0);
+} while (0)
 
 #define DPCD_READABLE_AREA                      0x600
 

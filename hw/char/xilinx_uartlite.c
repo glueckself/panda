@@ -23,8 +23,12 @@
  */
 
 #include "qemu/osdep.h"
+#include "hw/hw.h"
+#include "hw/irq.h"
+#include "hw/qdev-properties.h"
 #include "hw/sysbus.h"
-#include "sysemu/char.h"
+#include "qemu/module.h"
+#include "chardev/char-fe.h"
 
 #define DUART(x)
 
@@ -202,7 +206,7 @@ static int uart_can_rx(void *opaque)
     return s->rx_fifo_len < sizeof(s->rx_fifo);
 }
 
-static void uart_event(void *opaque, int event)
+static void uart_event(void *opaque, QEMUChrEvent event)
 {
 
 }
@@ -212,7 +216,7 @@ static void xilinx_uartlite_realize(DeviceState *dev, Error **errp)
     XilinxUARTLite *s = XILINX_UARTLITE(dev);
 
     qemu_chr_fe_set_handlers(&s->chr, uart_can_rx, uart_rx,
-                             uart_event, s, NULL, true);
+                             uart_event, NULL, s, NULL, true);
 }
 
 static void xilinx_uartlite_init(Object *obj)
@@ -232,7 +236,7 @@ static void xilinx_uartlite_class_init(ObjectClass *klass, void *data)
 
     dc->reset = xilinx_uartlite_reset;
     dc->realize = xilinx_uartlite_realize;
-    dc->props = xilinx_uartlite_properties;
+    device_class_set_props(dc, xilinx_uartlite_properties);
 }
 
 static const TypeInfo xilinx_uartlite_info = {

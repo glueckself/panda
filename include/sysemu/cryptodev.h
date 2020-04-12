@@ -23,8 +23,8 @@
 #ifndef CRYPTODEV_H
 #define CRYPTODEV_H
 
+#include "qemu/queue.h"
 #include "qom/object.h"
-#include "qemu-common.h"
 
 /**
  * CryptoDevBackend:
@@ -143,7 +143,7 @@ typedef struct CryptoDevBackendSymOpInfo {
     uint8_t *dst;
     uint8_t *aad_data;
     uint8_t *digest_result;
-    uint8_t data[0];
+    uint8_t data[];
 } CryptoDevBackendSymOpInfo;
 
 typedef struct CryptoDevBackendClass {
@@ -163,12 +163,20 @@ typedef struct CryptoDevBackendClass {
                      uint32_t queue_index, Error **errp);
 } CryptoDevBackendClass;
 
+typedef enum CryptoDevBackendOptionsType {
+    CRYPTODEV_BACKEND_TYPE_NONE = 0,
+    CRYPTODEV_BACKEND_TYPE_BUILTIN = 1,
+    CRYPTODEV_BACKEND_TYPE_VHOST_USER = 2,
+    CRYPTODEV_BACKEND_TYPE__MAX,
+} CryptoDevBackendOptionsType;
 
 struct CryptoDevBackendClient {
+    CryptoDevBackendOptionsType type;
     char *model;
     char *name;
     char *info_str;
     unsigned int queue_index;
+    int vring_enable;
     QTAILQ_ENTRY(CryptoDevBackendClient) next;
 };
 

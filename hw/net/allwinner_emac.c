@@ -16,12 +16,17 @@
  * GNU General Public License for more details.
  *
  */
+
 #include "qemu/osdep.h"
 #include "hw/sysbus.h"
+#include "migration/vmstate.h"
 #include "net/net.h"
 #include "qemu/fifo8.h"
+#include "hw/irq.h"
 #include "hw/net/allwinner_emac.h"
+#include "hw/qdev-properties.h"
 #include "qemu/log.h"
+#include "qemu/module.h"
 #include <zlib.h>
 
 static uint8_t padding[60];
@@ -514,7 +519,7 @@ static void aw_emac_class_init(ObjectClass *klass, void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->realize = aw_emac_realize;
-    dc->props = aw_emac_properties;
+    device_class_set_props(dc, aw_emac_properties);
     dc->reset = aw_emac_reset;
     dc->vmsd = &vmstate_aw_emac;
 }

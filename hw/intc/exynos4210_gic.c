@@ -22,8 +22,10 @@
 
 #include "qemu/osdep.h"
 #include "hw/sysbus.h"
-#include "qemu-common.h"
+#include "migration/vmstate.h"
+#include "qemu/module.h"
 #include "hw/irq.h"
+#include "hw/qdev-properties.h"
 #include "hw/arm/exynos4210.h"
 
 enum ExtGicId {
@@ -116,7 +118,7 @@ enum ExtInt {
  * which is INTG16 in Internal Interrupt Combiner.
  */
 
-static uint32_t
+static const uint32_t
 combiner_grp_to_gic_id[64-EXYNOS4210_MAX_EXT_COMBINER_OUT_IRQ][8] = {
     /* int combiner groups 16-19 */
     { }, { }, { }, { },
@@ -281,26 +283,27 @@ static void exynos4210_gic_set_irq(void *opaque, int irq, int level)
     qemu_set_irq(qdev_get_gpio_in(s->gic, irq), level);
 }
 
-static void exynos4210_gic_init(Object *obj)
+static void exynos4210_gic_realize(DeviceState *dev, Error **errp)
 {
-    DeviceState *dev = DEVICE(obj);
+    Object *obj = OBJECT(dev);
     Exynos4210GicState *s = EXYNOS4210_GIC(obj);
     SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
-    uint32_t i;
     const char cpu_prefix[] = "exynos4210-gic-alias_cpu";
     const char dist_prefix[] = "exynos4210-gic-alias_dist";
     char cpu_alias_name[sizeof(cpu_prefix) + 3];
     char dist_alias_name[sizeof(cpu_prefix) + 3];
-    SysBusDevice *busdev;
+    SysBusDevice *gicbusdev;
+    uint32_t n = s->num_cpu;
+    uint32_t i;
 
     s->gic = qdev_create(NULL, "arm_gic");
     qdev_prop_set_uint32(s->gic, "num-cpu", s->num_cpu);
     qdev_prop_set_uint32(s->gic, "num-irq", EXYNOS4210_GIC_NIRQ);
     qdev_init_nofail(s->gic);
-    busdev = SYS_BUS_DEVICE(s->gic);
+    gicbusdev = SYS_BUS_DEVICE(s->gic);
 
     /* Pass through outbound IRQ lines from the GIC */
-    sysbus_pass_irq(sbd, busdev);
+    sysbus_pass_irq(sbd, gicbusdev);
 
     /* Pass through inbound GPIO lines to the GIC */
     qdev_init_gpio_in(dev, exynos4210_gic_set_irq,
@@ -311,12 +314,18 @@ static void exynos4210_gic_init(Object *obj)
     memory_region_init(&s->dist_container, obj, "exynos4210-dist-container",
             EXYNOS4210_EXT_GIC_DIST_REGION_SIZE);
 
-    for (i = 0; i < s->num_cpu; i++) {
+    /*
+     * This clues in gcc that our on-stack buffers do, in fact have
+     * enough room for the cpu numbers.  gcc 9.2.1 on 32-bit x86
+     * doesn't figure this out, otherwise and gives spurious warnings.
+     */
+    assert(n <= EXYNOS4210_NCPUS);
+    for (i = 0; i < n; i++) {
         /* Map CPU interface per SMP Core */
         sprintf(cpu_alias_name, "%s%x", cpu_prefix, i);
         memory_region_init_alias(&s->cpu_alias[i], obj,
                                  cpu_alias_name,
-                                 sysbus_mmio_get_region(busdev, 1),
+                                 sysbus_mmio_get_region(gicbusdev, 1),
                                  0,
                                  EXYNOS4210_GIC_CPU_REGION_SIZE);
         memory_region_add_subregion(&s->cpu_container,
@@ -326,7 +335,7 @@ static void exynos4210_gic_init(Object *obj)
         sprintf(dist_alias_name, "%s%x", dist_prefix, i);
         memory_region_init_alias(&s->dist_alias[i], obj,
                                  dist_alias_name,
-                                 sysbus_mmio_get_region(busdev, 0),
+                                 sysbus_mmio_get_region(gicbusdev, 0),
                                  0,
                                  EXYNOS4210_GIC_DIST_REGION_SIZE);
         memory_region_add_subregion(&s->dist_container,
@@ -346,14 +355,14 @@ static void exynos4210_gic_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
 
-    dc->props = exynos4210_gic_properties;
+    device_class_set_props(dc, exynos4210_gic_properties);
+    dc->realize = exynos4210_gic_realize;
 }
 
 static const TypeInfo exynos4210_gic_info = {
     .name          = TYPE_EXYNOS4210_GIC,
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(Exynos4210GicState),
-    .instance_init = exynos4210_gic_init,
     .class_init    = exynos4210_gic_class_init,
 };
 
@@ -453,7 +462,7 @@ static void exynos4210_irq_gate_class_init(ObjectClass *klass, void *data)
 
     dc->reset = exynos4210_irq_gate_reset;
     dc->vmsd = &vmstate_exynos4210_irq_gate;
-    dc->props = exynos4210_irq_gate_properties;
+    device_class_set_props(dc, exynos4210_irq_gate_properties);
     dc->realize = exynos4210_irq_gate_realize;
 }
 

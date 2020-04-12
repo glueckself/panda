@@ -15,20 +15,13 @@
 #include "qemu/osdep.h"
 #include "qapi/error.h"
 #include "crypto/hmac.h"
-
-/* Support for HMAC Algos has been added in GLib 2.30 */
-#if GLIB_CHECK_VERSION(2, 30, 0)
+#include "hmacpriv.h"
 
 static int qcrypto_hmac_alg_map[QCRYPTO_HASH_ALG__MAX] = {
     [QCRYPTO_HASH_ALG_MD5] = G_CHECKSUM_MD5,
     [QCRYPTO_HASH_ALG_SHA1] = G_CHECKSUM_SHA1,
     [QCRYPTO_HASH_ALG_SHA256] = G_CHECKSUM_SHA256,
-/* Support for HMAC SHA-512 in GLib 2.42 */
-#if GLIB_CHECK_VERSION(2, 42, 0)
     [QCRYPTO_HASH_ALG_SHA512] = G_CHECKSUM_SHA512,
-#else
-    [QCRYPTO_HASH_ALG_SHA512] = -1,
-#endif
     [QCRYPTO_HASH_ALG_SHA224] = -1,
     [QCRYPTO_HASH_ALG_SHA384] = -1,
     [QCRYPTO_HASH_ALG_RIPEMD160] = -1,
@@ -49,21 +42,17 @@ bool qcrypto_hmac_supports(QCryptoHashAlgorithm alg)
     return false;
 }
 
-QCryptoHmac *qcrypto_hmac_new(QCryptoHashAlgorithm alg,
-                              const uint8_t *key, size_t nkey,
-                              Error **errp)
+void *qcrypto_hmac_ctx_new(QCryptoHashAlgorithm alg,
+                           const uint8_t *key, size_t nkey,
+                           Error **errp)
 {
-    QCryptoHmac *hmac;
     QCryptoHmacGlib *ctx;
 
     if (!qcrypto_hmac_supports(alg)) {
         error_setg(errp, "Unsupported hmac algorithm %s",
-                   QCryptoHashAlgorithm_lookup[alg]);
+                   QCryptoHashAlgorithm_str(alg));
         return NULL;
     }
-
-    hmac = g_new0(QCryptoHmac, 1);
-    hmac->alg = alg;
 
     ctx = g_new0(QCryptoHmacGlib, 1);
 
@@ -74,36 +63,31 @@ QCryptoHmac *qcrypto_hmac_new(QCryptoHashAlgorithm alg,
         goto error;
     }
 
-    hmac->opaque = ctx;
-    return hmac;
+    return ctx;
 
 error:
     g_free(ctx);
-    g_free(hmac);
     return NULL;
 }
 
-void qcrypto_hmac_free(QCryptoHmac *hmac)
+static void
+qcrypto_glib_hmac_ctx_free(QCryptoHmac *hmac)
 {
     QCryptoHmacGlib *ctx;
-
-    if (!hmac) {
-        return;
-    }
 
     ctx = hmac->opaque;
     g_hmac_unref(ctx->ghmac);
 
     g_free(ctx);
-    g_free(hmac);
 }
 
-int qcrypto_hmac_bytesv(QCryptoHmac *hmac,
-                        const struct iovec *iov,
-                        size_t niov,
-                        uint8_t **result,
-                        size_t *resultlen,
-                        Error **errp)
+static int
+qcrypto_glib_hmac_bytesv(QCryptoHmac *hmac,
+                         const struct iovec *iov,
+                         size_t niov,
+                         uint8_t **result,
+                         size_t *resultlen,
+                         Error **errp)
 {
     QCryptoHmacGlib *ctx;
     int i, ret;
@@ -134,33 +118,7 @@ int qcrypto_hmac_bytesv(QCryptoHmac *hmac,
     return 0;
 }
 
-#else
-
-bool qcrypto_hmac_supports(QCryptoHashAlgorithm alg)
-{
-    return false;
-}
-
-QCryptoHmac *qcrypto_hmac_new(QCryptoHashAlgorithm alg,
-                              const uint8_t *key, size_t nkey,
-                              Error **errp)
-{
-    return NULL;
-}
-
-void qcrypto_hmac_free(QCryptoHmac *hmac)
-{
-    return;
-}
-
-int qcrypto_hmac_bytesv(QCryptoHmac *hmac,
-                        const struct iovec *iov,
-                        size_t niov,
-                        uint8_t **result,
-                        size_t *resultlen,
-                        Error **errp)
-{
-    return -1;
-}
-
-#endif
+QCryptoHmacDriver qcrypto_hmac_lib_driver = {
+    .hmac_bytesv = qcrypto_glib_hmac_bytesv,
+    .hmac_free = qcrypto_glib_hmac_ctx_free,
+};

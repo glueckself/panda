@@ -28,11 +28,14 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/error-report.h"
+#include "qemu/module.h"
 #include "qapi/error.h"
 #include "qemu/timer.h"
-#include "sysemu/char.h"
-#include "sysemu/sysemu.h"
+#include "chardev/char-fe.h"
 #include "hw/ipmi/ipmi.h"
+#include "hw/qdev-properties.h"
+#include "migration/vmstate.h"
 
 #define VM_MSG_CHAR        0xA0 /* Marks end of message */
 #define VM_CMD_CHAR        0xA1 /* Marks end of a command */
@@ -83,10 +86,6 @@ typedef struct IPMIBmcExtern {
     /* A reset event is pending to be sent upstream. */
     bool send_reset;
 } IPMIBmcExtern;
-
-static int can_receive(void *opaque);
-static void receive(void *opaque, const uint8_t *buf, int size);
-static void chr_event(void *opaque, int event);
 
 static unsigned char
 ipmb_checksum(const unsigned char *data, int size, unsigned char start)
@@ -174,8 +173,7 @@ static void addchar(IPMIBmcExtern *ibe, unsigned char ch)
         ibe->outbuf[ibe->outlen] = VM_ESCAPE_CHAR;
         ibe->outlen++;
         ch |= 0x10;
-        /* No break */
-
+        /* fall through */
     default:
         ibe->outbuf[ibe->outlen] = ch;
         ibe->outlen++;
@@ -194,8 +192,8 @@ static void ipmi_bmc_extern_handle_command(IPMIBmc *b,
 
     if (ibe->outlen) {
         /* We already have a command queued.  Shouldn't ever happen. */
-        fprintf(stderr, "IPMI KCS: Got command when not finished with the"
-                " previous command\n");
+        error_report("IPMI KCS: Got command when not finished with the"
+                     " previous command");
         abort();
     }
 
@@ -381,7 +379,7 @@ static void receive(void *opaque, const uint8_t *buf, int size)
     handle_hw_op(ibe, hw_op);
 }
 
-static void chr_event(void *opaque, int event)
+static void chr_event(void *opaque, QEMUChrEvent event)
 {
     IPMIBmcExtern *ibe = opaque;
     IPMIInterface *s = ibe->parent.intf;
@@ -424,6 +422,11 @@ static void chr_event(void *opaque, int event)
             return;
         }
         ibe->connected = false;
+        /*
+         * Don't hang the OS trying to handle the ATN bit, other end will
+         * resend on a reconnect.
+         */
+        k->set_atn(s, 0, 0);
         if (ibe->waiting_rsp) {
             ibe->waiting_rsp = false;
             ibe->inbuf[1] = ibe->outbuf[1] | 0x04;
@@ -431,6 +434,12 @@ static void chr_event(void *opaque, int event)
             ibe->inbuf[3] = IPMI_CC_BMC_INIT_IN_PROGRESS;
             k->handle_rsp(s, ibe->outbuf[0], ibe->inbuf + 1, 3);
         }
+        break;
+
+    case CHR_EVENT_BREAK:
+    case CHR_EVENT_MUX_IN:
+    case CHR_EVENT_MUX_OUT:
+        /* Ignore */
         break;
     }
 }
@@ -447,13 +456,13 @@ static void ipmi_bmc_extern_realize(DeviceState *dev, Error **errp)
 {
     IPMIBmcExtern *ibe = IPMI_BMC_EXTERN(dev);
 
-    if (!qemu_chr_fe_get_driver(&ibe->chr)) {
+    if (!qemu_chr_fe_backend_connected(&ibe->chr)) {
         error_setg(errp, "IPMI external bmc requires chardev attribute");
         return;
     }
 
     qemu_chr_fe_set_handlers(&ibe->chr, can_receive, receive,
-                             chr_event, ibe, NULL, true);
+                             chr_event, NULL, ibe, NULL, true);
 }
 
 static int ipmi_bmc_extern_post_migrate(void *opaque, int version_id)
@@ -519,7 +528,7 @@ static void ipmi_bmc_extern_class_init(ObjectClass *oc, void *data)
     bk->handle_reset = ipmi_bmc_extern_handle_reset;
     dc->hotpluggable = false;
     dc->realize = ipmi_bmc_extern_realize;
-    dc->props = ipmi_bmc_extern_properties;
+    device_class_set_props(dc, ipmi_bmc_extern_properties);
 }
 
 static const TypeInfo ipmi_bmc_extern_type = {

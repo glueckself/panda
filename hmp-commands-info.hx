@@ -1,17 +1,21 @@
-HXCOMM Use DEFHEADING() to define headings in both help text and texi
-HXCOMM Text between STEXI and ETEXI are copied to texi version and
-HXCOMM discarded from C version
+HXCOMM Use DEFHEADING() to define headings in both help text and rST.
+HXCOMM Text between SRST and ERST is copied to the rST version and
+HXCOMM discarded from C version.
 HXCOMM DEF(command, args, callback, arg_string, help) is used to construct
 HXCOMM monitor info commands
-HXCOMM HXCOMM can be used for comments, discarded from both texi and C
+HXCOMM HXCOMM can be used for comments, discarded from both rST and C.
+HXCOMM
+HXCOMM In this file, generally SRST fragments should have two extra
+HXCOMM spaces of indent, so that the documentation list item for "info foo"
+HXCOMM appears inside the documentation list item for the top level
+HXCOMM "info" documentation entry. The exception is the first SRST
+HXCOMM fragment that defines that top level entry.
 
-STEXI
-@table @option
-@item info @var{subcommand}
-@findex info
-Show various information about the system state.
-@table @option
-ETEXI
+SRST
+``info`` *subcommand*
+  Show various information about the system state.
+
+ERST
 
     {
         .name       = "version",
@@ -19,13 +23,13 @@ ETEXI
         .params     = "",
         .help       = "show the version of QEMU",
         .cmd        = hmp_info_version,
+        .flags      = "p",
     },
 
-STEXI
-@item info version
-@findex version
-Show the version of QEMU.
-ETEXI
+SRST
+  ``info version``
+    Show the version of QEMU.
+ERST
 
     {
         .name       = "network",
@@ -35,11 +39,10 @@ ETEXI
         .cmd        = hmp_info_network,
     },
 
-STEXI
-@item info network
-@findex network
-Show the network state.
-ETEXI
+SRST
+  ``info network``
+    Show the network state.
+ERST
 
     {
         .name       = "chardev",
@@ -47,13 +50,13 @@ ETEXI
         .params     = "",
         .help       = "show the character devices",
         .cmd        = hmp_info_chardev,
+        .flags      = "p",
     },
 
-STEXI
-@item info chardev
-@findex chardev
-Show the character devices.
-ETEXI
+SRST
+  ``info chardev``
+    Show the character devices.
+ERST
 
     {
         .name       = "block",
@@ -64,11 +67,10 @@ ETEXI
         .cmd        = hmp_info_block,
     },
 
-STEXI
-@item info block
-@findex block
-Show info of one block device or all block devices.
-ETEXI
+SRST
+  ``info block``
+    Show info of one block device or all block devices.
+ERST
 
     {
         .name       = "blockstats",
@@ -78,11 +80,10 @@ ETEXI
         .cmd        = hmp_info_blockstats,
     },
 
-STEXI
-@item info blockstats
-@findex blockstats
-Show block device statistics.
-ETEXI
+SRST
+  ``info blockstats``
+    Show block device statistics.
+ERST
 
     {
         .name       = "block-jobs",
@@ -92,41 +93,39 @@ ETEXI
         .cmd        = hmp_info_block_jobs,
     },
 
-STEXI
-@item info block-jobs
-@findex block-jobs
-Show progress of ongoing block device operations.
-ETEXI
+SRST
+  ``info block-jobs``
+    Show progress of ongoing block device operations.
+ERST
 
     {
         .name       = "registers",
-        .args_type  = "",
-        .params     = "",
-        .help       = "show the cpu registers",
+        .args_type  = "cpustate_all:-a",
+        .params     = "[-a]",
+        .help       = "show the cpu registers (-a: all - show register info for all cpus)",
         .cmd        = hmp_info_registers,
     },
 
-STEXI
-@item info registers
-@findex registers
-Show the cpu registers.
-ETEXI
+SRST
+  ``info registers``
+    Show the cpu registers.
+ERST
 
 #if defined(TARGET_I386)
     {
         .name       = "lapic",
-        .args_type  = "",
-        .params     = "",
-        .help       = "show local apic state",
+        .args_type  = "apic-id:i?",
+        .params     = "[apic-id]",
+        .help       = "show local apic state (apic-id: local apic to read, default is which of current CPU)",
+
         .cmd        = hmp_info_local_apic,
     },
 #endif
 
-STEXI
-@item info lapic
-@findex lapic
-Show local APIC state
-ETEXI
+SRST
+  ``info lapic``
+    Show local APIC state
+ERST
 
 #if defined(TARGET_I386)
     {
@@ -138,11 +137,10 @@ ETEXI
     },
 #endif
 
-STEXI
-@item info ioapic
-@findex ioapic
-Show io APIC state
-ETEXI
+SRST
+  ``info ioapic``
+    Show io APIC state
+ERST
 
     {
         .name       = "cpus",
@@ -152,11 +150,10 @@ ETEXI
         .cmd        = hmp_info_cpus,
     },
 
-STEXI
-@item info cpus
-@findex cpus
-Show infos for each CPU.
-ETEXI
+SRST
+  ``info cpus``
+    Show infos for each CPU.
+ERST
 
     {
         .name       = "history",
@@ -164,13 +161,13 @@ ETEXI
         .params     = "",
         .help       = "show the command line history",
         .cmd        = hmp_info_history,
+        .flags      = "p",
     },
 
-STEXI
-@item info history
-@findex history
-Show the command line history.
-ETEXI
+SRST
+  ``info history``
+    Show the command line history.
+ERST
 
     {
         .name       = "irq",
@@ -180,11 +177,10 @@ ETEXI
         .cmd        = hmp_info_irq,
     },
 
-STEXI
-@item info irq
-@findex irq
-Show the interrupts statistics (if available).
-ETEXI
+SRST
+  ``info irq``
+    Show the interrupts statistics (if available).
+ERST
 
     {
         .name       = "pic",
@@ -194,11 +190,23 @@ ETEXI
         .cmd        = hmp_info_pic,
     },
 
-STEXI
-@item info pic
-@findex pic
-Show i8259 (PIC) state.
-ETEXI
+SRST
+  ``info pic``
+    Show PIC state.
+ERST
+
+    {
+        .name       = "rdma",
+        .args_type  = "",
+        .params     = "",
+        .help       = "show RDMA state",
+        .cmd        = hmp_info_rdma,
+    },
+
+SRST
+  ``info rdma``
+    Show RDMA state.
+ERST
 
     {
         .name       = "pci",
@@ -208,14 +216,13 @@ ETEXI
         .cmd        = hmp_info_pci,
     },
 
-STEXI
-@item info pci
-@findex pci
-Show PCI information.
-ETEXI
+SRST
+  ``info pci``
+    Show PCI information.
+ERST
 
 #if defined(TARGET_I386) || defined(TARGET_SH4) || defined(TARGET_SPARC) || \
-    defined(TARGET_PPC) || defined(TARGET_XTENSA)
+    defined(TARGET_PPC) || defined(TARGET_XTENSA) || defined(TARGET_M68K)
     {
         .name       = "tlb",
         .args_type  = "",
@@ -225,13 +232,12 @@ ETEXI
     },
 #endif
 
-STEXI
-@item info tlb
-@findex tlb
-Show virtual to physical memory mappings.
-ETEXI
+SRST
+  ``info tlb``
+    Show virtual to physical memory mappings.
+ERST
 
-#if defined(TARGET_I386)
+#if defined(TARGET_I386) || defined(TARGET_RISCV)
     {
         .name       = "mem",
         .args_type  = "",
@@ -241,26 +247,27 @@ ETEXI
     },
 #endif
 
-STEXI
-@item info mem
-@findex mem
-Show the active virtual memory mappings.
-ETEXI
+SRST
+  ``info mem``
+    Show the active virtual memory mappings.
+ERST
 
     {
         .name       = "mtree",
-        .args_type  = "flatview:-f",
-        .params     = "[-f]",
-        .help       = "show memory tree (-f: dump flat view for address spaces)",
+        .args_type  = "flatview:-f,dispatch_tree:-d,owner:-o",
+        .params     = "[-f][-d][-o]",
+        .help       = "show memory tree (-f: dump flat view for address spaces;"
+                      "-d: dump dispatch tree, valid with -f only);"
+                      "-o: dump region owners/parents",
         .cmd        = hmp_info_mtree,
     },
 
-STEXI
-@item info mtree
-@findex mtree
-Show memory tree.
-ETEXI
+SRST
+  ``info mtree``
+    Show memory tree.
+ERST
 
+#if defined(CONFIG_TCG)
     {
         .name       = "jit",
         .args_type  = "",
@@ -268,13 +275,14 @@ ETEXI
         .help       = "show dynamic compiler info",
         .cmd        = hmp_info_jit,
     },
+#endif
 
-STEXI
-@item info jit
-@findex jit
-Show dynamic compiler info.
-ETEXI
+SRST
+  ``info jit``
+    Show dynamic compiler info.
+ERST
 
+#if defined(CONFIG_TCG)
     {
         .name       = "opcount",
         .args_type  = "",
@@ -282,12 +290,38 @@ ETEXI
         .help       = "show dynamic compiler opcode counters",
         .cmd        = hmp_info_opcount,
     },
+#endif
 
-STEXI
-@item info opcount
-@findex opcount
-Show dynamic compiler opcode counters
-ETEXI
+SRST
+  ``info opcount``
+    Show dynamic compiler opcode counters
+ERST
+
+    {
+        .name       = "sync-profile",
+        .args_type  = "mean:-m,no_coalesce:-n,max:i?",
+        .params     = "[-m] [-n] [max]",
+        .help       = "show synchronization profiling info, up to max entries "
+                      "(default: 10), sorted by total wait time. (-m: sort by "
+                      "mean wait time; -n: do not coalesce objects with the "
+                      "same call site)",
+        .cmd        = hmp_info_sync_profile,
+    },
+
+SRST
+  ``info sync-profile [-m|-n]`` [*max*]
+    Show synchronization profiling info, up to *max* entries (default: 10),
+    sorted by total wait time.
+
+    ``-m``
+      sort by mean wait time
+    ``-n``
+      do not coalesce objects with the same call site
+
+    When different objects that share the same call site are coalesced,
+    the "Object" field shows---enclosed in brackets---the number of objects
+    being coalesced.
+ERST
 
     {
         .name       = "kvm",
@@ -297,11 +331,10 @@ ETEXI
         .cmd        = hmp_info_kvm,
     },
 
-STEXI
-@item info kvm
-@findex kvm
-Show KVM information.
-ETEXI
+SRST
+  ``info kvm``
+    Show KVM information.
+ERST
 
     {
         .name       = "numa",
@@ -311,11 +344,10 @@ ETEXI
         .cmd        = hmp_info_numa,
     },
 
-STEXI
-@item info numa
-@findex numa
-Show NUMA information.
-ETEXI
+SRST
+  ``info numa``
+    Show NUMA information.
+ERST
 
     {
         .name       = "usb",
@@ -325,11 +357,10 @@ ETEXI
         .cmd        = hmp_info_usb,
     },
 
-STEXI
-@item info usb
-@findex usb
-Show guest USB devices.
-ETEXI
+SRST
+  ``info usb``
+    Show guest USB devices.
+ERST
 
     {
         .name       = "usbhost",
@@ -339,11 +370,10 @@ ETEXI
         .cmd        = hmp_info_usbhost,
     },
 
-STEXI
-@item info usbhost
-@findex usbhost
-Show host USB devices.
-ETEXI
+SRST
+  ``info usbhost``
+    Show host USB devices.
+ERST
 
     {
         .name       = "profile",
@@ -353,11 +383,10 @@ ETEXI
         .cmd        = hmp_info_profile,
     },
 
-STEXI
-@item info profile
-@findex profile
-Show profiling information.
-ETEXI
+SRST
+  ``info profile``
+    Show profiling information.
+ERST
 
     {
         .name       = "capture",
@@ -367,11 +396,10 @@ ETEXI
         .cmd        = hmp_info_capture,
     },
 
-STEXI
-@item info capture
-@findex capture
-Show capture information.
-ETEXI
+SRST
+  ``info capture``
+    Show capture information.
+ERST
 
     {
         .name       = "snapshots",
@@ -381,11 +409,10 @@ ETEXI
         .cmd        = hmp_info_snapshots,
     },
 
-STEXI
-@item info snapshots
-@findex snapshots
-Show the currently saved VM snapshots.
-ETEXI
+SRST
+  ``info snapshots``
+    Show the currently saved VM snapshots.
+ERST
 
     {
         .name       = "status",
@@ -393,13 +420,13 @@ ETEXI
         .params     = "",
         .help       = "show the current VM status (running|paused)",
         .cmd        = hmp_info_status,
+        .flags      = "p",
     },
 
-STEXI
-@item info status
-@findex status
-Show the current VM status (running|paused).
-ETEXI
+SRST
+  ``info status``
+    Show the current VM status (running|paused).
+ERST
 
     {
         .name       = "mice",
@@ -409,12 +436,12 @@ ETEXI
         .cmd        = hmp_info_mice,
     },
 
-STEXI
-@item info mice
-@findex mice
-Show which guest mouse is receiving events.
-ETEXI
+SRST
+  ``info mice``
+    Show which guest mouse is receiving events.
+ERST
 
+#if defined(CONFIG_VNC)
     {
         .name       = "vnc",
         .args_type  = "",
@@ -422,12 +449,12 @@ ETEXI
         .help       = "show the vnc server status",
         .cmd        = hmp_info_vnc,
     },
+#endif
 
-STEXI
-@item info vnc
-@findex vnc
-Show the vnc server status.
-ETEXI
+SRST
+  ``info vnc``
+    Show the vnc server status.
+ERST
 
 #if defined(CONFIG_SPICE)
     {
@@ -439,11 +466,10 @@ ETEXI
     },
 #endif
 
-STEXI
-@item info spice
-@findex spice
-Show the spice server status.
-ETEXI
+SRST
+  ``info spice``
+    Show the spice server status.
+ERST
 
     {
         .name       = "name",
@@ -451,13 +477,13 @@ ETEXI
         .params     = "",
         .help       = "show the current VM name",
         .cmd        = hmp_info_name,
+        .flags      = "p",
     },
 
-STEXI
-@item info name
-@findex name
-Show the current VM name.
-ETEXI
+SRST
+  ``info name``
+    Show the current VM name.
+ERST
 
     {
         .name       = "uuid",
@@ -465,13 +491,13 @@ ETEXI
         .params     = "",
         .help       = "show the current VM UUID",
         .cmd        = hmp_info_uuid,
+        .flags      = "p",
     },
 
-STEXI
-@item info uuid
-@findex uuid
-Show the current VM UUID.
-ETEXI
+SRST
+  ``info uuid``
+    Show the current VM UUID.
+ERST
 
     {
         .name       = "cpustats",
@@ -481,11 +507,10 @@ ETEXI
         .cmd        = hmp_info_cpustats,
     },
 
-STEXI
-@item info cpustats
-@findex cpustats
-Show CPU statistics.
-ETEXI
+SRST
+  ``info cpustats``
+    Show CPU statistics.
+ERST
 
 #if defined(CONFIG_SLIRP)
     {
@@ -497,11 +522,10 @@ ETEXI
     },
 #endif
 
-STEXI
-@item info usernet
-@findex usernet
-Show user network stack connection states.
-ETEXI
+SRST
+  ``info usernet``
+    Show user network stack connection states.
+ERST
 
     {
         .name       = "migrate",
@@ -511,11 +535,10 @@ ETEXI
         .cmd        = hmp_info_migrate,
     },
 
-STEXI
-@item info migrate
-@findex migrate
-Show migration status.
-ETEXI
+SRST
+  ``info migrate``
+    Show migration status.
+ERST
 
     {
         .name       = "migrate_capabilities",
@@ -525,11 +548,10 @@ ETEXI
         .cmd        = hmp_info_migrate_capabilities,
     },
 
-STEXI
-@item info migrate_capabilities
-@findex migrate_capabilities
-Show current migration capabilities.
-ETEXI
+SRST
+  ``info migrate_capabilities``
+    Show current migration capabilities.
+ERST
 
     {
         .name       = "migrate_parameters",
@@ -539,11 +561,10 @@ ETEXI
         .cmd        = hmp_info_migrate_parameters,
     },
 
-STEXI
-@item info migrate_parameters
-@findex migrate_parameters
-Show current migration parameters.
-ETEXI
+SRST
+  ``info migrate_parameters``
+    Show current migration parameters.
+ERST
 
     {
         .name       = "migrate_cache_size",
@@ -553,11 +574,10 @@ ETEXI
         .cmd        = hmp_info_migrate_cache_size,
     },
 
-STEXI
-@item info migrate_cache_size
-@findex migrate_cache_size
-Show current migration xbzrle cache size.
-ETEXI
+SRST
+  ``info migrate_cache_size``
+    Show current migration xbzrle cache size.
+ERST
 
     {
         .name       = "balloon",
@@ -567,11 +587,10 @@ ETEXI
         .cmd        = hmp_info_balloon,
     },
 
-STEXI
-@item info balloon
-@findex balloon
-Show balloon information.
-ETEXI
+SRST
+  ``info balloon``
+    Show balloon information.
+ERST
 
     {
         .name       = "qtree",
@@ -581,11 +600,10 @@ ETEXI
         .cmd        = hmp_info_qtree,
     },
 
-STEXI
-@item info qtree
-@findex qtree
-Show device tree.
-ETEXI
+SRST
+  ``info qtree``
+    Show device tree.
+ERST
 
     {
         .name       = "qdm",
@@ -595,11 +613,10 @@ ETEXI
         .cmd        = hmp_info_qdm,
     },
 
-STEXI
-@item info qdm
-@findex qdm
-Show qdev device model list.
-ETEXI
+SRST
+  ``info qdm``
+    Show qdev device model list.
+ERST
 
     {
         .name       = "qom-tree",
@@ -607,13 +624,13 @@ ETEXI
         .params     = "[path]",
         .help       = "show QOM composition tree",
         .cmd        = hmp_info_qom_tree,
+        .flags      = "p",
     },
 
-STEXI
-@item info qom-tree
-@findex qom-tree
-Show QOM composition tree.
-ETEXI
+SRST
+  ``info qom-tree``
+    Show QOM composition tree.
+ERST
 
     {
         .name       = "roms",
@@ -623,11 +640,10 @@ ETEXI
         .cmd        = hmp_info_roms,
     },
 
-STEXI
-@item info roms
-@findex roms
-Show roms.
-ETEXI
+SRST
+  ``info roms``
+    Show roms.
+ERST
 
     {
         .name       = "trace-events",
@@ -639,11 +655,10 @@ ETEXI
         .command_completion = info_trace_events_completion,
     },
 
-STEXI
-@item info trace-events
-@findex trace-events
-Show available trace-events & their state.
-ETEXI
+SRST
+  ``info trace-events``
+    Show available trace-events & their state.
+ERST
 
     {
         .name       = "tpm",
@@ -653,11 +668,10 @@ ETEXI
         .cmd        = hmp_info_tpm,
     },
 
-STEXI
-@item info tpm
-@findex tpm
-Show the TPM device.
-ETEXI
+SRST
+  ``info tpm``
+    Show the TPM device.
+ERST
 
     {
         .name       = "memdev",
@@ -665,13 +679,13 @@ ETEXI
         .params     = "",
         .help       = "show memory backends",
         .cmd        = hmp_info_memdev,
+        .flags      = "p",
     },
 
-STEXI
-@item info memdev
-@findex memdev
-Show memory backends
-ETEXI
+SRST
+  ``info memdev``
+    Show memory backends
+ERST
 
     {
         .name       = "memory-devices",
@@ -681,11 +695,10 @@ ETEXI
         .cmd        = hmp_info_memory_devices,
     },
 
-STEXI
-@item info memory-devices
-@findex memory-devices
-Show memory devices.
-ETEXI
+SRST
+  ``info memory-devices``
+    Show memory devices.
+ERST
 
     {
         .name       = "iothreads",
@@ -693,13 +706,13 @@ ETEXI
         .params     = "",
         .help       = "show iothreads",
         .cmd        = hmp_info_iothreads,
+        .flags      = "p",
     },
 
-STEXI
-@item info iothreads
-@findex iothreads
-Show iothread's identifiers.
-ETEXI
+SRST
+  ``info iothreads``
+    Show iothread's identifiers.
+ERST
 
     {
         .name       = "rocker",
@@ -709,11 +722,10 @@ ETEXI
         .cmd        = hmp_rocker,
     },
 
-STEXI
-@item info rocker @var{name}
-@findex rocker
-Show rocker switch.
-ETEXI
+SRST
+  ``info rocker`` *name*
+    Show rocker switch.
+ERST
 
     {
         .name       = "rocker-ports",
@@ -723,11 +735,10 @@ ETEXI
         .cmd        = hmp_rocker_ports,
     },
 
-STEXI
-@item info rocker_ports @var{name}-ports
-@findex ocker-ports
-Show rocker ports.
-ETEXI
+SRST
+  ``info rocker-ports`` *name*-ports
+    Show rocker ports.
+ERST
 
     {
         .name       = "rocker-of-dpa-flows",
@@ -737,11 +748,10 @@ ETEXI
         .cmd        = hmp_rocker_of_dpa_flows,
     },
 
-STEXI
-@item info rocker_of_dpa_flows @var{name} [@var{tbl_id}]
-@findex rocker-of-dpa-flows
-Show rocker OF-DPA flow tables.
-ETEXI
+SRST
+  ``info rocker-of-dpa-flows`` *name* [*tbl_id*]
+    Show rocker OF-DPA flow tables.
+ERST
 
     {
         .name       = "rocker-of-dpa-groups",
@@ -751,11 +761,10 @@ ETEXI
         .cmd        = hmp_rocker_of_dpa_groups,
     },
 
-STEXI
-@item info rocker-of-dpa-groups @var{name} [@var{type}]
-@findex rocker-of-dpa-groups
-Show rocker OF-DPA groups.
-ETEXI
+SRST
+  ``info rocker-of-dpa-groups`` *name* [*type*]
+    Show rocker OF-DPA groups.
+ERST
 
 #if defined(TARGET_S390X)
     {
@@ -767,11 +776,26 @@ ETEXI
     },
 #endif
 
-STEXI
-@item info skeys @var{address}
-@findex skeys
-Display the value of a storage key (s390 only)
-ETEXI
+SRST
+  ``info skeys`` *address*
+    Display the value of a storage key (s390 only)
+ERST
+
+#if defined(TARGET_S390X)
+    {
+        .name       = "cmma",
+        .args_type  = "addr:l,count:l?",
+        .params     = "address [count]",
+        .help       = "Display the values of the CMMA storage attributes for a range of pages",
+        .cmd        = hmp_info_cmma,
+    },
+#endif
+
+SRST
+  ``info cmma`` *address*
+    Display the values of the CMMA storage attributes for a range of
+    pages (s390 only)
+ERST
 
     {
         .name       = "dump",
@@ -781,11 +805,23 @@ ETEXI
         .cmd        = hmp_info_dump,
     },
 
-STEXI
-@item info dump
-@findex dump
-Display the latest dump status.
-ETEXI
+SRST
+  ``info dump``
+    Display the latest dump status.
+ERST
+
+    {
+        .name       = "ramblock",
+        .args_type  = "",
+        .params     = "",
+        .help       = "Display system ramblock information",
+        .cmd        = hmp_info_ramblock,
+    },
+
+SRST
+  ``info ramblock``
+    Dump all the ramblocks of the system.
+ERST
 
     {
         .name       = "hotpluggable-cpus",
@@ -793,19 +829,13 @@ ETEXI
         .params     = "",
         .help       = "Show information about hotpluggable CPUs",
         .cmd        = hmp_hotpluggable_cpus,
+        .flags      = "p",
     },
 
-STEXI
-@item info hotpluggable-cpus
-@findex hotpluggable-cpus
-Show information about hotpluggable CPUs
-ETEXI
-
-STEXI
-@item info vm-generation-id
-@findex vm-generation-id
-Show Virtual Machine Generation ID
-ETEXI
+SRST
+  ``info hotpluggable-cpus``
+    Show information about hotpluggable CPUs
+ERST
 
     {
         .name       = "vm-generation-id",
@@ -815,10 +845,39 @@ ETEXI
         .cmd = hmp_info_vm_generation_id,
     },
 
-STEXI
-@end table
-ETEXI
+SRST
+  ``info vm-generation-id``
+    Show Virtual Machine Generation ID
+ERST
 
-STEXI
-@end table
-ETEXI
+    {
+        .name       = "memory_size_summary",
+        .args_type  = "",
+        .params     = "",
+        .help       = "show the amount of initially allocated and "
+                      "present hotpluggable (if enabled) memory in bytes.",
+        .cmd        = hmp_info_memory_size_summary,
+    },
+
+SRST
+  ``info memory_size_summary``
+    Display the amount of initially allocated and present hotpluggable (if
+    enabled) memory in bytes.
+ERST
+
+#if defined(TARGET_I386)
+    {
+        .name       = "sev",
+        .args_type  = "",
+        .params     = "",
+        .help       = "show SEV information",
+        .cmd        = hmp_info_sev,
+    },
+#endif
+
+SRST
+  ``info sev``
+    Show SEV information.
+ERST
+
+

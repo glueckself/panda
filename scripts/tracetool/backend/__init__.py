@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 """
@@ -118,6 +117,9 @@ class Wrapper:
 
     def generate(self, event, group):
         self._run_function("generate_%s", event, group)
+
+    def generate_backend_dstate(self, event, group):
+        self._run_function("generate_%s_backend_dstate", event, group)
 
     def generate_end(self, events, group):
         self._run_function("generate_%s_end", events, group)

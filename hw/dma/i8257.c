@@ -21,11 +21,15 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 #include "qemu/osdep.h"
-#include "hw/hw.h"
 #include "hw/isa/isa.h"
-#include "hw/isa/i8257.h"
+#include "hw/qdev-properties.h"
+#include "migration/vmstate.h"
+#include "hw/dma/i8257.h"
 #include "qemu/main-loop.h"
+#include "qemu/module.h"
+#include "qemu/log.h"
 #include "trace.h"
 
 #define I8257(obj) \
@@ -185,7 +189,8 @@ static void i8257_write_cont(void *opaque, hwaddr nport, uint64_t data,
     switch (iport) {
     case 0x00:                  /* command */
         if ((data != 0) && (data & CMD_NOT_SUPPORTED)) {
-            dolog("command %"PRIx64" not supported\n", data);
+            qemu_log_mask(LOG_UNIMP, "%s: cmd 0x%02"PRIx64" not supported\n",
+                          __func__, data);
             return;
         }
         d->command = data;
@@ -548,7 +553,7 @@ static void i8257_realize(DeviceState *dev, Error **errp)
     I8257State *d = I8257(dev);
     int i;
 
-    memory_region_init_io(&d->channel_io, NULL, &channel_io_ops, d,
+    memory_region_init_io(&d->channel_io, OBJECT(dev), &channel_io_ops, d,
                           "dma-chan", 8 << d->dshift);
     memory_region_add_subregion(isa_address_space_io(isa),
                                 d->base, &d->channel_io);
@@ -590,7 +595,7 @@ static void i8257_class_init(ObjectClass *klass, void *data)
     dc->realize = i8257_realize;
     dc->reset = i8257_reset;
     dc->vmsd = &vmstate_i8257;
-    dc->props = i8257_properties;
+    device_class_set_props(dc, i8257_properties);
 
     idc->get_transfer_mode = i8257_dma_get_transfer_mode;
     idc->has_autoinitialization = i8257_dma_has_autoinitialization;
@@ -622,7 +627,7 @@ static void i8257_register_types(void)
 
 type_init(i8257_register_types)
 
-void DMA_init(ISABus *bus, int high_page_enable)
+void i8257_dma_init(ISABus *bus, bool high_page_enable)
 {
     ISADevice *isa1, *isa2;
     DeviceState *d;

@@ -1,10 +1,9 @@
 #include "qemu/osdep.h"
 #include "sysemu/replay.h"
-#include "sysemu/sysemu.h"
 
 ReplayMode replay_mode;
 
-int64_t replay_save_clock(unsigned int kind, int64_t clock)
+int64_t replay_save_clock(unsigned int kind, int64_t clock, int64_t raw_icount)
 {
     abort();
     return 0;
@@ -69,6 +68,23 @@ void replay_block_event(QEMUBH *bh, uint64_t id)
 }
 
 uint64_t blkreplay_next_id(void)
+{
+    return 0;
+}
+
+void replay_mutex_lock(void)
+{
+}
+
+void replay_mutex_unlock(void)
+{
+}
+
+void replay_save_random(int ret, void *buf, size_t len)
+{
+}
+
+int replay_read_random(void *buf, size_t len)
 {
     return 0;
 }

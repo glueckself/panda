@@ -142,7 +142,7 @@ target_ulong helper_read_crN(CPUX86State *env, int reg)
         break;
     case 8:
         if (!(env->hflags2 & HF2_VINTR_MASK)) {
-            val = cpu_get_apic_tpr(x86_env_get_cpu(env)->apic_state);
+            val = cpu_get_apic_tpr(env_archcpu(env)->apic_state);
         } else {
             val = env->v_tpr;
         }
@@ -166,7 +166,7 @@ void helper_write_crN(CPUX86State *env, int reg, target_ulong t0)
         break;
     case 8:
         if (!(env->hflags2 & HF2_VINTR_MASK)) {
-            cpu_set_apic_tpr(x86_env_get_cpu(env)->apic_state, t0);
+            cpu_set_apic_tpr(env_archcpu(env)->apic_state, t0);
         }
         env->v_tpr = t0 & 0x0f;
         break;
@@ -187,7 +187,7 @@ void helper_lmsw(CPUX86State *env, target_ulong t0)
 
 void helper_invlpg(CPUX86State *env, target_ulong addr)
 {
-    X86CPU *cpu = x86_env_get_cpu(env);
+    X86CPU *cpu = env_archcpu(env);
 
     cpu_svm_check_intercept_param(env, SVM_EXIT_INVLPG, 0, GETPC());
     tlb_flush_page(CPU(cpu), addr);
@@ -263,7 +263,7 @@ void helper_wrmsr(CPUX86State *env)
         env->sysenter_eip = val;
         break;
     case MSR_IA32_APICBASE:
-        cpu_set_apic_base(x86_env_get_cpu(env)->apic_state, val);
+        cpu_set_apic_base(env_archcpu(env)->apic_state, val);
         break;
     case MSR_EFER:
         {
@@ -405,6 +405,7 @@ void helper_wrmsr(CPUX86State *env)
 
 void helper_rdmsr(CPUX86State *env)
 {
+    X86CPU *x86_cpu = env_archcpu(env);
     uint64_t val;
 
     cpu_svm_check_intercept_param(env, SVM_EXIT_MSR, 0, GETPC());
@@ -420,7 +421,7 @@ void helper_rdmsr(CPUX86State *env)
         val = env->sysenter_eip;
         break;
     case MSR_IA32_APICBASE:
-        val = cpu_get_apic_base(x86_env_get_cpu(env)->apic_state);
+        val = cpu_get_apic_base(env_archcpu(env)->apic_state);
         break;
     case MSR_EFER:
         val = env->efer;
@@ -463,6 +464,9 @@ void helper_rdmsr(CPUX86State *env)
         val = env->tsc_aux;
         break;
 #endif
+    case MSR_SMI_COUNT:
+        val = env->msr_smi_count;
+        break;
     case MSR_MTRRphysBase(0):
     case MSR_MTRRphysBase(1):
     case MSR_MTRRphysBase(2):
@@ -535,6 +539,9 @@ void helper_rdmsr(CPUX86State *env)
     case MSR_IA32_BNDCFGS:
         val = env->msr_bndcfgs;
         break;
+     case MSR_IA32_UCODE_REV:
+        val = x86_cpu->ucode_rev;
+        break;
     default:
         if ((uint32_t)env->regs[R_ECX] >= MSR_MC0_CTL
             && (uint32_t)env->regs[R_ECX] < MSR_MC0_CTL +
@@ -574,7 +581,7 @@ static void do_hlt(X86CPU *cpu)
 
 void helper_hlt(CPUX86State *env, int next_eip_addend)
 {
-    X86CPU *cpu = x86_env_get_cpu(env);
+    X86CPU *cpu = env_archcpu(env);
 
     cpu_svm_check_intercept_param(env, SVM_EXIT_HLT, 0, GETPC());
     env->eip += next_eip_addend;
@@ -593,8 +600,8 @@ void helper_monitor(CPUX86State *env, target_ulong ptr)
 
 void helper_mwait(CPUX86State *env, int next_eip_addend)
 {
-    CPUState *cs;
-    X86CPU *cpu;
+    CPUState *cs = env_cpu(env);
+    X86CPU *cpu = env_archcpu(env);
 
     if ((uint32_t)env->regs[R_ECX] != 0) {
         raise_exception_ra(env, EXCP0D_GPF, GETPC());
@@ -602,8 +609,6 @@ void helper_mwait(CPUX86State *env, int next_eip_addend)
     cpu_svm_check_intercept_param(env, SVM_EXIT_MWAIT, 0, GETPC());
     env->eip += next_eip_addend;
 
-    cpu = x86_env_get_cpu(env);
-    cs = CPU(cpu);
     /* XXX: not complete but not completely erroneous */
     if (cs->cpu_index != 0 || CPU_NEXT(cs) != NULL) {
         do_pause(cpu);
@@ -614,7 +619,7 @@ void helper_mwait(CPUX86State *env, int next_eip_addend)
 
 void helper_pause(CPUX86State *env, int next_eip_addend)
 {
-    X86CPU *cpu = x86_env_get_cpu(env);
+    X86CPU *cpu = env_archcpu(env);
 
     cpu_svm_check_intercept_param(env, SVM_EXIT_PAUSE, 0, GETPC());
     env->eip += next_eip_addend;
@@ -624,7 +629,7 @@ void helper_pause(CPUX86State *env, int next_eip_addend)
 
 void helper_debug(CPUX86State *env)
 {
-    CPUState *cs = CPU(x86_env_get_cpu(env));
+    CPUState *cs = env_cpu(env);
 
     cs->exception_index = EXCP_DEBUG;
     cpu_loop_exit(cs);
@@ -644,7 +649,7 @@ uint64_t helper_rdpkru(CPUX86State *env, uint32_t ecx)
 
 void helper_wrpkru(CPUX86State *env, uint32_t ecx, uint64_t val)
 {
-    CPUState *cs = CPU(x86_env_get_cpu(env));
+    CPUState *cs = env_cpu(env);
 
     if ((env->cr[4] & CR4_PKE_MASK) == 0) {
         raise_exception_err_ra(env, EXCP06_ILLOP, 0, GETPC());

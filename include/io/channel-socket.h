@@ -101,6 +101,8 @@ int qio_channel_socket_connect_sync(QIOChannelSocket *ioc,
  * @callback: the function to invoke on completion
  * @opaque: user data to pass to @callback
  * @destroy: the function to free @opaque
+ * @context: the context to run the async task. If %NULL, the default
+ *           context will be used.
  *
  * Attempt to connect to the address @addr. This method
  * will run in the background so the caller will regain
@@ -113,13 +115,15 @@ void qio_channel_socket_connect_async(QIOChannelSocket *ioc,
                                       SocketAddress *addr,
                                       QIOTaskFunc callback,
                                       gpointer opaque,
-                                      GDestroyNotify destroy);
+                                      GDestroyNotify destroy,
+                                      GMainContext *context);
 
 
 /**
  * qio_channel_socket_listen_sync:
  * @ioc: the socket channel object
  * @addr: the address to listen to
+ * @num: the expected ammount of connections
  * @errp: pointer to a NULL-initialized error object
  *
  * Attempt to listen to the address @addr. This method
@@ -129,15 +133,19 @@ void qio_channel_socket_connect_async(QIOChannelSocket *ioc,
  */
 int qio_channel_socket_listen_sync(QIOChannelSocket *ioc,
                                    SocketAddress *addr,
+                                   int num,
                                    Error **errp);
 
 /**
  * qio_channel_socket_listen_async:
  * @ioc: the socket channel object
  * @addr: the address to listen to
+ * @num: the expected ammount of connections
  * @callback: the function to invoke on completion
  * @opaque: user data to pass to @callback
  * @destroy: the function to free @opaque
+ * @context: the context to run the async task. If %NULL, the default
+ *           context will be used.
  *
  * Attempt to listen to the address @addr. This method
  * will run in the background so the caller will regain
@@ -148,9 +156,11 @@ int qio_channel_socket_listen_sync(QIOChannelSocket *ioc,
  */
 void qio_channel_socket_listen_async(QIOChannelSocket *ioc,
                                      SocketAddress *addr,
+                                     int num,
                                      QIOTaskFunc callback,
                                      gpointer opaque,
-                                     GDestroyNotify destroy);
+                                     GDestroyNotify destroy,
+                                     GMainContext *context);
 
 
 /**
@@ -179,6 +189,8 @@ int qio_channel_socket_dgram_sync(QIOChannelSocket *ioc,
  * @callback: the function to invoke on completion
  * @opaque: user data to pass to @callback
  * @destroy: the function to free @opaque
+ * @context: the context to run the async task. If %NULL, the default
+ *           context will be used.
  *
  * Attempt to initialize a datagram socket bound to
  * @localAddr and communicating with peer @remoteAddr.
@@ -194,7 +206,8 @@ void qio_channel_socket_dgram_async(QIOChannelSocket *ioc,
                                     SocketAddress *remoteAddr,
                                     QIOTaskFunc callback,
                                     gpointer opaque,
-                                    GDestroyNotify destroy);
+                                    GDestroyNotify destroy,
+                                    GMainContext *context);
 
 
 /**
@@ -205,7 +218,7 @@ void qio_channel_socket_dgram_async(QIOChannelSocket *ioc,
  * Get the string representation of the local socket
  * address. A pointer to the allocated address information
  * struct will be returned, which the caller is required to
- * release with a call qapi_free_SocketAddress when no
+ * release with a call qapi_free_SocketAddress() when no
  * longer required.
  *
  * Returns: 0 on success, -1 on error
@@ -222,7 +235,7 @@ qio_channel_socket_get_local_address(QIOChannelSocket *ioc,
  * Get the string representation of the local socket
  * address. A pointer to the allocated address information
  * struct will be returned, which the caller is required to
- * release with a call qapi_free_SocketAddress when no
+ * release with a call qapi_free_SocketAddress() when no
  * longer required.
  *
  * Returns: the socket address struct, or NULL on error

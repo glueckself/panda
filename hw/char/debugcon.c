@@ -26,10 +26,10 @@
 
 #include "qemu/osdep.h"
 #include "qapi/error.h"
-#include "hw/hw.h"
-#include "sysemu/char.h"
+#include "qemu/module.h"
+#include "chardev/char-fe.h"
 #include "hw/isa/isa.h"
-#include "hw/i386/pc.h"
+#include "hw/qdev-properties.h"
 
 #define TYPE_ISA_DEBUGCON_DEVICE "isa-debugcon"
 #define ISA_DEBUGCON_DEVICE(obj) \
@@ -87,12 +87,12 @@ static const MemoryRegionOps debugcon_ops = {
 
 static void debugcon_realize_core(DebugconState *s, Error **errp)
 {
-    if (!qemu_chr_fe_get_driver(&s->chr)) {
+    if (!qemu_chr_fe_backend_connected(&s->chr)) {
         error_setg(errp, "Can't create debugcon device, empty char device");
         return;
     }
 
-    qemu_chr_fe_set_handlers(&s->chr, NULL, NULL, NULL, s, NULL, true);
+    qemu_chr_fe_set_handlers(&s->chr, NULL, NULL, NULL, NULL, s, NULL, true);
 }
 
 static void debugcon_isa_realizefn(DeviceState *dev, Error **errp)
@@ -125,7 +125,7 @@ static void debugcon_isa_class_initfn(ObjectClass *klass, void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->realize = debugcon_isa_realizefn;
-    dc->props = debugcon_isa_properties;
+    device_class_set_props(dc, debugcon_isa_properties);
     set_bit(DEVICE_CATEGORY_MISC, dc->categories);
 }
 

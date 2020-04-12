@@ -10,9 +10,13 @@
 
 #include "qemu/osdep.h"
 #include "hw/hw.h"
+#include "hw/irq.h"
+#include "hw/qdev-properties.h"
 #include "hw/arm/pxa.h"
 #include "hw/sysbus.h"
+#include "migration/vmstate.h"
 #include "qapi/error.h"
+#include "qemu/module.h"
 
 #define PXA255_DMA_NUM_CHANNELS 16
 #define PXA27X_DMA_NUM_CHANNELS 32
@@ -169,7 +173,7 @@ static inline void pxa2xx_dma_descriptor_fetch(
         s->chan[ch].dest &= ~3;
 
     if (s->chan[ch].cmd & (DCMD_CMPEN | DCMD_FLYBYS | DCMD_FLYBYT))
-        printf("%s: unsupported mode in channel %i\n", __FUNCTION__, ch);
+        printf("%s: unsupported mode in channel %i\n", __func__, ch);
 
     if (s->chan[ch].cmd & DCMD_STARTIRQEN)
         s->chan[ch].state |= DCSR_STARTINTR;
@@ -228,7 +232,7 @@ static void pxa2xx_dma_run(PXA2xxDMAState *s)
                                         !(ch->state & DCSR_NODESCFETCH))
                             pxa2xx_dma_descriptor_fetch(s, c);
                         break;
-		    }
+                    }
                 }
 
                 ch->cmd = (ch->cmd & ~DCMD_LEN) | length;
@@ -264,7 +268,7 @@ static uint64_t pxa2xx_dma_read(void *opaque, hwaddr offset,
     unsigned int channel;
 
     if (size != 4) {
-        hw_error("%s: Bad access width\n", __FUNCTION__);
+        hw_error("%s: Bad access width\n", __func__);
         return 5;
     }
 
@@ -283,7 +287,7 @@ static uint64_t pxa2xx_dma_read(void *opaque, hwaddr offset,
 
     case DCSR0 ... DCSR31:
         channel = offset >> 2;
-	if (s->chan[channel].request)
+        if (s->chan[channel].request)
             return s->chan[channel].state | DCSR_REQPEND;
         return s->chan[channel].state;
 
@@ -312,7 +316,7 @@ static uint64_t pxa2xx_dma_read(void *opaque, hwaddr offset,
         }
     }
 
-    hw_error("%s: Bad offset 0x" TARGET_FMT_plx "\n", __FUNCTION__, offset);
+    hw_error("%s: Bad offset 0x" TARGET_FMT_plx "\n", __func__, offset);
     return 7;
 }
 
@@ -323,7 +327,7 @@ static void pxa2xx_dma_write(void *opaque, hwaddr offset,
     unsigned int channel;
 
     if (size != 4) {
-        hw_error("%s: Bad access width\n", __FUNCTION__);
+        hw_error("%s: Bad access width\n", __func__);
         return;
     }
 
@@ -337,7 +341,7 @@ static void pxa2xx_dma_write(void *opaque, hwaddr offset,
         if (value & DRCMR_MAPVLD)
             if ((value & DRCMR_CHLNUM) > s->channels)
                 hw_error("%s: Bad DMA channel %i\n",
-                         __FUNCTION__, (unsigned)value & DRCMR_CHLNUM);
+                         __func__, (unsigned)value & DRCMR_CHLNUM);
 
         s->req[channel] = value;
         break;
@@ -416,7 +420,7 @@ static void pxa2xx_dma_write(void *opaque, hwaddr offset,
             break;
         }
     fail:
-        hw_error("%s: Bad offset " TARGET_FMT_plx "\n", __FUNCTION__, offset);
+        hw_error("%s: Bad offset " TARGET_FMT_plx "\n", __func__, offset);
     }
 }
 
@@ -431,7 +435,7 @@ static void pxa2xx_dma_request(void *opaque, int req_num, int on)
     PXA2xxDMAState *s = opaque;
     int ch;
     if (req_num < 0 || req_num >= PXA2XX_DMA_NUM_REQUESTS)
-        hw_error("%s: Bad DMA request %i\n", __FUNCTION__, req_num);
+        hw_error("%s: Bad DMA request %i\n", __func__, req_num);
 
     if (!(s->req[req_num] & DRCMR_MAPVLD))
         return;
@@ -562,7 +566,7 @@ static void pxa2xx_dma_class_init(ObjectClass *klass, void *data)
 
     dc->desc = "PXA2xx DMA controller";
     dc->vmsd = &vmstate_pxa2xx_dma;
-    dc->props = pxa2xx_dma_properties;
+    device_class_set_props(dc, pxa2xx_dma_properties);
     dc->realize = pxa2xx_dma_realize;
 }
 

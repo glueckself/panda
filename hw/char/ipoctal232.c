@@ -10,8 +10,12 @@
 
 #include "qemu/osdep.h"
 #include "hw/ipack/ipack.h"
+#include "hw/irq.h"
+#include "hw/qdev-properties.h"
+#include "migration/vmstate.h"
 #include "qemu/bitops.h"
-#include "sysemu/char.h"
+#include "qemu/module.h"
+#include "chardev/char-fe.h"
 
 /* #define DEBUG_IPOCTAL */
 
@@ -499,7 +503,7 @@ static void hostdev_receive(void *opaque, const uint8_t *buf, int size)
     }
 }
 
-static void hostdev_event(void *opaque, int event)
+static void hostdev_event(void *opaque, QEMUChrEvent event)
 {
     SCC2698Channel *ch = opaque;
     switch (event) {
@@ -542,10 +546,10 @@ static void ipoctal_realize(DeviceState *dev, Error **errp)
         ch->ipoctal = s;
 
         /* Redirect IP-Octal channels to host character devices */
-        if (qemu_chr_fe_get_driver(&ch->dev)) {
+        if (qemu_chr_fe_backend_connected(&ch->dev)) {
             qemu_chr_fe_set_handlers(&ch->dev, hostdev_can_receive,
                                      hostdev_receive, hostdev_event,
-                                     ch, NULL, true);
+                                     NULL, ch, NULL, true);
             DPRINTF("Redirecting channel %u to %s\n", i, ch->dev->label);
         } else {
             DPRINTF("Could not redirect channel %u, no chardev set\n", i);
@@ -584,7 +588,7 @@ static void ipoctal_class_init(ObjectClass *klass, void *data)
 
     set_bit(DEVICE_CATEGORY_INPUT, dc->categories);
     dc->desc    = "GE IP-Octal 232 8-channel RS-232 IndustryPack";
-    dc->props   = ipoctal_properties;
+    device_class_set_props(dc, ipoctal_properties);
     dc->vmsd    = &vmstate_ipoctal;
 }
 

@@ -21,7 +21,7 @@
 #ifndef QEMU_PCIE_AER_H
 #define QEMU_PCIE_AER_H
 
-#include "hw/hw.h"
+#include "hw/pci/pci_regs.h"
 
 /* definitions which PCIExpressDevice uses */
 
@@ -99,9 +99,5 @@ void pcie_aer_root_reset(PCIDevice *dev);
 void pcie_aer_root_write_config(PCIDevice *dev,
                                 uint32_t addr, uint32_t val, int len,
                                 uint32_t root_cmd_prev);
-
-/* error injection */
-int pcie_aer_inject_error(PCIDevice *dev, const PCIEAERErr *err);
-void pcie_aer_msg(PCIDevice *dev, const PCIEAERMsg *msg);
 
 #endif /* QEMU_PCIE_AER_H */

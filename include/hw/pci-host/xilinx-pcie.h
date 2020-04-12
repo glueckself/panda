@@ -20,10 +20,9 @@
 #ifndef HW_XILINX_PCIE_H
 #define HW_XILINX_PCIE_H
 
-#include "hw/hw.h"
 #include "hw/sysbus.h"
 #include "hw/pci/pci.h"
-#include "hw/pci/pci_bus.h"
+#include "hw/pci/pci_bridge.h"
 #include "hw/pci/pcie_host.h"
 
 #define TYPE_XILINX_PCIE_HOST "xilinx-pcie-host"

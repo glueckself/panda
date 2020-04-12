@@ -14,13 +14,15 @@
  */
 
 #include "qemu/osdep.h"
-#include "hw/qdev.h"
 #include "qemu/thread.h"
 #include "qemu/error-report.h"
-#include "sysemu/char.h"
+#include "qemu/module.h"
+#include "chardev/char-fe.h"
 
 #include "hw/s390x/sclp.h"
+#include "migration/vmstate.h"
 #include "hw/s390x/event-facility.h"
+#include "hw/qdev-properties.h"
 #include "hw/s390x/ebcdic.h"
 
 #define SIZE_BUFFER 4096
@@ -29,7 +31,7 @@
 typedef struct OprtnsCommand {
     EventBufferHeader header;
     MDMSU message_unit;
-    char data[0];
+    char data[];
 } QEMU_PACKED OprtnsCommand;
 
 /* max size for line-mode data in 4K SCCB page */
@@ -102,12 +104,12 @@ static bool can_handle_event(uint8_t type)
     return type == SCLP_EVENT_MESSAGE || type == SCLP_EVENT_PMSGCMD;
 }
 
-static unsigned int send_mask(void)
+static sccb_mask_t send_mask(void)
 {
     return SCLP_EVENT_MASK_OP_CMD | SCLP_EVENT_MASK_PMSGCMD;
 }
 
-static unsigned int receive_mask(void)
+static sccb_mask_t receive_mask(void)
 {
     return SCLP_EVENT_MASK_MSG | SCLP_EVENT_MASK_PMSGCMD;
 }
@@ -195,7 +197,7 @@ static int write_console_data(SCLPEvent *event, const uint8_t *buf, int len)
 {
     SCLPConsoleLM *scon = SCLPLM_CONSOLE(event);
 
-    if (!qemu_chr_fe_get_driver(&scon->chr)) {
+    if (!qemu_chr_fe_backend_connected(&scon->chr)) {
         /* If there's no backend, we can just say we consumed all data. */
         return len;
     }
@@ -313,13 +315,8 @@ static int console_init(SCLPEvent *event)
     console_available = true;
 
     qemu_chr_fe_set_handlers(&scon->chr, chr_can_read,
-                             chr_read, NULL, scon, NULL, true);
+                             chr_read, NULL, NULL, scon, NULL, true);
 
-    return 0;
-}
-
-static int console_exit(SCLPEvent *event)
-{
     return 0;
 }
 
@@ -345,11 +342,10 @@ static void console_class_init(ObjectClass *klass, void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
     SCLPEventClass *ec = SCLP_EVENT_CLASS(klass);
 
-    dc->props = console_properties;
+    device_class_set_props(dc, console_properties);
     dc->reset = console_reset;
     dc->vmsd = &vmstate_sclplmconsole;
     ec->init = console_init;
-    ec->exit = console_exit;
     ec->get_send_mask = send_mask;
     ec->get_receive_mask = receive_mask;
     ec->can_handle_event = can_handle_event;

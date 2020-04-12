@@ -13,22 +13,22 @@
 
 #include "qemu/osdep.h"
 #include "qapi/error.h"
-#include "qemu-common.h"
 #include "cpu.h"
 #include "sysemu/qtest.h"
-#include "hw/qdev.h"
-#include "sysemu/char.h"
+#include "sysemu/runstate.h"
+#include "chardev/char-fe.h"
 #include "exec/ioport.h"
 #include "exec/memory.h"
 #include "hw/irq.h"
 #include "sysemu/accel.h"
-#include "sysemu/sysemu.h"
 #include "sysemu/cpus.h"
 #include "qemu/config-file.h"
 #include "qemu/option.h"
 #include "qemu/error-report.h"
+#include "qemu/module.h"
 #include "qemu/cutils.h"
-#ifdef TARGET_PPC64
+#include "config-devices.h"
+#ifdef CONFIG_PSERIES
 #include "hw/ppc/spapr_rtas.h"
 #endif
 
@@ -43,6 +43,8 @@ static GString *inbuf;
 static int irq_levels[MAX_IRQ];
 static qemu_timeval start_time;
 static bool qtest_opened;
+static void (*qtest_server_send)(void*, const char*);
+static void *qtest_server_send_opaque;
 
 #define FMT_timeval "%ld.%06ld"
 
@@ -164,6 +166,17 @@ static bool qtest_opened;
  * where NUM is an IRQ number.  For the PC, interrupts can be intercepted
  * simply with "irq_intercept_in ioapic" (note that IRQ0 comes out with
  * NUM=0 even though it is remapped to GSI 2).
+ *
+ * Setting interrupt level:
+ *
+ *  > set_irq_in QOM-PATH NAME NUM LEVEL
+ *  < OK
+ *
+ *  where NAME is the name of the irq/gpio list, NUM is an IRQ number and
+ *  LEVEL is an signed integer IRQ level.
+ *
+ * Forcibly set the given interrupt pin to the given level.
+ *
  */
 
 static int hex2nib(char ch)
@@ -218,8 +231,10 @@ static void GCC_FMT_ATTR(1, 2) qtest_log_send(const char *fmt, ...)
     va_end(ap);
 }
 
-static void do_qtest_send(CharBackend *chr, const char *str, size_t len)
+static void qtest_server_char_be_send(void *opaque, const char *str)
 {
+    size_t len = strlen(str);
+    CharBackend* chr = (CharBackend *)opaque;
     qemu_chr_fe_write_all(chr, (uint8_t *)str, len);
     if (qtest_log_fp && qtest_opened) {
         fprintf(qtest_log_fp, "%s", str);
@@ -228,7 +243,7 @@ static void do_qtest_send(CharBackend *chr, const char *str, size_t len)
 
 static void qtest_send(CharBackend *chr, const char *str)
 {
-    do_qtest_send(chr, str, strlen(str));
+    qtest_server_send(qtest_server_send_opaque, str);
 }
 
 static void GCC_FMT_ATTR(2, 3) qtest_sendf(CharBackend *chr,
@@ -290,7 +305,7 @@ static void qtest_process_command(CharBackend *chr, gchar **words)
         if (!dev) {
             qtest_send_prefix(chr);
             qtest_send(chr, "FAIL Unknown device\n");
-	    return;
+            return;
         }
 
         if (irq_intercept_dev) {
@@ -300,7 +315,7 @@ static void qtest_process_command(CharBackend *chr, gchar **words)
             } else {
                 qtest_send(chr, "OK\n");
             }
-	    return;
+            return;
         }
 
         QLIST_FOREACH(ngl, &dev->gpios, node) {
@@ -326,16 +341,51 @@ static void qtest_process_command(CharBackend *chr, gchar **words)
         irq_intercept_dev = dev;
         qtest_send_prefix(chr);
         qtest_send(chr, "OK\n");
+    } else if (strcmp(words[0], "set_irq_in") == 0) {
+        DeviceState *dev;
+        qemu_irq irq;
+        char *name;
+        int ret;
+        int num;
+        int level;
 
+        g_assert(words[1] && words[2] && words[3] && words[4]);
+
+        dev = DEVICE(object_resolve_path(words[1], NULL));
+        if (!dev) {
+            qtest_send_prefix(chr);
+            qtest_send(chr, "FAIL Unknown device\n");
+            return;
+        }
+
+        if (strcmp(words[2], "unnamed-gpio-in") == 0) {
+            name = NULL;
+        } else {
+            name = words[2];
+        }
+
+        ret = qemu_strtoi(words[3], NULL, 0, &num);
+        g_assert(!ret);
+        ret = qemu_strtoi(words[4], NULL, 0, &level);
+        g_assert(!ret);
+
+        irq = qdev_get_gpio_in_named(dev, name, num);
+
+        qemu_set_irq(irq, level);
+        qtest_send_prefix(chr);
+        qtest_send(chr, "OK\n");
     } else if (strcmp(words[0], "outb") == 0 ||
                strcmp(words[0], "outw") == 0 ||
                strcmp(words[0], "outl") == 0) {
         unsigned long addr;
         unsigned long value;
+        int ret;
 
         g_assert(words[1] && words[2]);
-        g_assert(qemu_strtoul(words[1], NULL, 0, &addr) == 0);
-        g_assert(qemu_strtoul(words[2], NULL, 0, &value) == 0);
+        ret = qemu_strtoul(words[1], NULL, 0, &addr);
+        g_assert(ret == 0);
+        ret = qemu_strtoul(words[2], NULL, 0, &value);
+        g_assert(ret == 0);
         g_assert(addr <= 0xffff);
 
         if (words[0][3] == 'b') {
@@ -352,9 +402,11 @@ static void qtest_process_command(CharBackend *chr, gchar **words)
         strcmp(words[0], "inl") == 0) {
         unsigned long addr;
         uint32_t value = -1U;
+        int ret;
 
         g_assert(words[1]);
-        g_assert(qemu_strtoul(words[1], NULL, 0, &addr) == 0);
+        ret = qemu_strtoul(words[1], NULL, 0, &addr);
+        g_assert(ret == 0);
         g_assert(addr <= 0xffff);
 
         if (words[0][2] == 'b') {
@@ -372,26 +424,33 @@ static void qtest_process_command(CharBackend *chr, gchar **words)
                strcmp(words[0], "writeq") == 0) {
         uint64_t addr;
         uint64_t value;
+        int ret;
 
         g_assert(words[1] && words[2]);
-        g_assert(qemu_strtou64(words[1], NULL, 0, &addr) == 0);
-        g_assert(qemu_strtou64(words[2], NULL, 0, &value) == 0);
+        ret = qemu_strtou64(words[1], NULL, 0, &addr);
+        g_assert(ret == 0);
+        ret = qemu_strtou64(words[2], NULL, 0, &value);
+        g_assert(ret == 0);
 
         if (words[0][5] == 'b') {
             uint8_t data = value;
-            cpu_physical_memory_write(addr, &data, 1);
+            address_space_write(first_cpu->as, addr, MEMTXATTRS_UNSPECIFIED,
+                                &data, 1);
         } else if (words[0][5] == 'w') {
             uint16_t data = value;
             tswap16s(&data);
-            cpu_physical_memory_write(addr, &data, 2);
+            address_space_write(first_cpu->as, addr, MEMTXATTRS_UNSPECIFIED,
+                                &data, 2);
         } else if (words[0][5] == 'l') {
             uint32_t data = value;
             tswap32s(&data);
-            cpu_physical_memory_write(addr, &data, 4);
+            address_space_write(first_cpu->as, addr, MEMTXATTRS_UNSPECIFIED,
+                                &data, 4);
         } else if (words[0][5] == 'q') {
             uint64_t data = value;
             tswap64s(&data);
-            cpu_physical_memory_write(addr, &data, 8);
+            address_space_write(first_cpu->as, addr, MEMTXATTRS_UNSPECIFIED,
+                                &data, 8);
         }
         qtest_send_prefix(chr);
         qtest_send(chr, "OK\n");
@@ -401,24 +460,30 @@ static void qtest_process_command(CharBackend *chr, gchar **words)
                strcmp(words[0], "readq") == 0) {
         uint64_t addr;
         uint64_t value = UINT64_C(-1);
+        int ret;
 
         g_assert(words[1]);
-        g_assert(qemu_strtou64(words[1], NULL, 0, &addr) == 0);
+        ret = qemu_strtou64(words[1], NULL, 0, &addr);
+        g_assert(ret == 0);
 
         if (words[0][4] == 'b') {
             uint8_t data;
-            cpu_physical_memory_read(addr, &data, 1);
+            address_space_read(first_cpu->as, addr, MEMTXATTRS_UNSPECIFIED,
+                               &data, 1);
             value = data;
         } else if (words[0][4] == 'w') {
             uint16_t data;
-            cpu_physical_memory_read(addr, &data, 2);
+            address_space_read(first_cpu->as, addr, MEMTXATTRS_UNSPECIFIED,
+                               &data, 2);
             value = tswap16(data);
         } else if (words[0][4] == 'l') {
             uint32_t data;
-            cpu_physical_memory_read(addr, &data, 4);
+            address_space_read(first_cpu->as, addr, MEMTXATTRS_UNSPECIFIED,
+                               &data, 4);
             value = tswap32(data);
         } else if (words[0][4] == 'q') {
-            cpu_physical_memory_read(addr, &value, 8);
+            address_space_read(first_cpu->as, addr, MEMTXATTRS_UNSPECIFIED,
+                               &value, 8);
             tswap64s(&value);
         }
         qtest_send_prefix(chr);
@@ -427,15 +492,19 @@ static void qtest_process_command(CharBackend *chr, gchar **words)
         uint64_t addr, len, i;
         uint8_t *data;
         char *enc;
+        int ret;
 
         g_assert(words[1] && words[2]);
-        g_assert(qemu_strtou64(words[1], NULL, 0, &addr) == 0);
-        g_assert(qemu_strtou64(words[2], NULL, 0, &len) == 0);
+        ret = qemu_strtou64(words[1], NULL, 0, &addr);
+        g_assert(ret == 0);
+        ret = qemu_strtou64(words[2], NULL, 0, &len);
+        g_assert(ret == 0);
         /* We'd send garbage to libqtest if len is 0 */
         g_assert(len);
 
         data = g_malloc(len);
-        cpu_physical_memory_read(addr, data, len);
+        address_space_read(first_cpu->as, addr, MEMTXATTRS_UNSPECIFIED, data,
+                           len);
 
         enc = g_malloc(2 * len + 1);
         for (i = 0; i < len; i++) {
@@ -451,13 +520,17 @@ static void qtest_process_command(CharBackend *chr, gchar **words)
         uint64_t addr, len;
         uint8_t *data;
         gchar *b64_data;
+        int ret;
 
         g_assert(words[1] && words[2]);
-        g_assert(qemu_strtou64(words[1], NULL, 0, &addr) == 0);
-        g_assert(qemu_strtou64(words[2], NULL, 0, &len) == 0);
+        ret = qemu_strtou64(words[1], NULL, 0, &addr);
+        g_assert(ret == 0);
+        ret = qemu_strtou64(words[2], NULL, 0, &len);
+        g_assert(ret == 0);
 
         data = g_malloc(len);
-        cpu_physical_memory_read(addr, data, len);
+        address_space_read(first_cpu->as, addr, MEMTXATTRS_UNSPECIFIED, data,
+                           len);
         b64_data = g_base64_encode(data, len);
         qtest_send_prefix(chr);
         qtest_sendf(chr, "OK %s\n", b64_data);
@@ -468,10 +541,13 @@ static void qtest_process_command(CharBackend *chr, gchar **words)
         uint64_t addr, len, i;
         uint8_t *data;
         size_t data_len;
+        int ret;
 
         g_assert(words[1] && words[2] && words[3]);
-        g_assert(qemu_strtou64(words[1], NULL, 0, &addr) == 0);
-        g_assert(qemu_strtou64(words[2], NULL, 0, &len) == 0);
+        ret = qemu_strtou64(words[1], NULL, 0, &addr);
+        g_assert(ret == 0);
+        ret = qemu_strtou64(words[2], NULL, 0, &len);
+        g_assert(ret == 0);
 
         data_len = strlen(words[3]);
         if (data_len < 3) {
@@ -488,7 +564,8 @@ static void qtest_process_command(CharBackend *chr, gchar **words)
                 data[i] = 0;
             }
         }
-        cpu_physical_memory_write(addr, data, len);
+        address_space_write(first_cpu->as, addr, MEMTXATTRS_UNSPECIFIED, data,
+                            len);
         g_free(data);
 
         qtest_send_prefix(chr);
@@ -497,16 +574,21 @@ static void qtest_process_command(CharBackend *chr, gchar **words)
         uint64_t addr, len;
         uint8_t *data;
         unsigned long pattern;
+        int ret;
 
         g_assert(words[1] && words[2] && words[3]);
-        g_assert(qemu_strtou64(words[1], NULL, 0, &addr) == 0);
-        g_assert(qemu_strtou64(words[2], NULL, 0, &len) == 0);
-        g_assert(qemu_strtoul(words[3], NULL, 0, &pattern) == 0);
+        ret = qemu_strtou64(words[1], NULL, 0, &addr);
+        g_assert(ret == 0);
+        ret = qemu_strtou64(words[2], NULL, 0, &len);
+        g_assert(ret == 0);
+        ret = qemu_strtoul(words[3], NULL, 0, &pattern);
+        g_assert(ret == 0);
 
         if (len) {
             data = g_malloc(len);
             memset(data, pattern, len);
-            cpu_physical_memory_write(addr, data, len);
+            address_space_write(first_cpu->as, addr, MEMTXATTRS_UNSPECIFIED,
+                                data, len);
             g_free(data);
         }
 
@@ -517,10 +599,13 @@ static void qtest_process_command(CharBackend *chr, gchar **words)
         uint8_t *data;
         size_t data_len;
         gsize out_len;
+        int ret;
 
         g_assert(words[1] && words[2] && words[3]);
-        g_assert(qemu_strtou64(words[1], NULL, 0, &addr) == 0);
-        g_assert(qemu_strtou64(words[2], NULL, 0, &len) == 0);
+        ret = qemu_strtou64(words[1], NULL, 0, &addr);
+        g_assert(ret == 0);
+        ret = qemu_strtou64(words[2], NULL, 0, &len);
+        g_assert(ret == 0);
 
         data_len = strlen(words[3]);
         if (data_len < 3) {
@@ -536,7 +621,8 @@ static void qtest_process_command(CharBackend *chr, gchar **words)
             out_len = MIN(out_len, len);
         }
 
-        cpu_physical_memory_write(addr, data, out_len);
+        address_space_write(first_cpu->as, addr, MEMTXATTRS_UNSPECIFIED, data,
+                            len);
 
         qtest_send_prefix(chr);
         qtest_send(chr, "OK\n");
@@ -547,15 +633,20 @@ static void qtest_process_command(CharBackend *chr, gchar **words)
 #else
         qtest_sendf(chr, "OK little\n");
 #endif
-#ifdef TARGET_PPC64
+#ifdef CONFIG_PSERIES
     } else if (strcmp(words[0], "rtas") == 0) {
         uint64_t res, args, ret;
         unsigned long nargs, nret;
+        int rc;
 
-        g_assert(qemu_strtoul(words[2], NULL, 0, &nargs) == 0);
-        g_assert(qemu_strtou64(words[3], NULL, 0, &args) == 0);
-        g_assert(qemu_strtoul(words[4], NULL, 0, &nret) == 0);
-        g_assert(qemu_strtou64(words[5], NULL, 0, &ret) == 0);
+        rc = qemu_strtoul(words[2], NULL, 0, &nargs);
+        g_assert(rc == 0);
+        rc = qemu_strtou64(words[3], NULL, 0, &args);
+        g_assert(rc == 0);
+        rc = qemu_strtoul(words[4], NULL, 0, &nret);
+        g_assert(rc == 0);
+        rc = qemu_strtou64(words[5], NULL, 0, &ret);
+        g_assert(rc == 0);
         res = qtest_rtas_call(words[1], nargs, args, nret, ret);
 
         qtest_send_prefix(chr);
@@ -565,19 +656,32 @@ static void qtest_process_command(CharBackend *chr, gchar **words)
         int64_t ns;
 
         if (words[1]) {
-            g_assert(qemu_strtoi64(words[1], NULL, 0, &ns) == 0);
+            int ret = qemu_strtoi64(words[1], NULL, 0, &ns);
+            g_assert(ret == 0);
         } else {
-            ns = qemu_clock_deadline_ns_all(QEMU_CLOCK_VIRTUAL);
+            ns = qemu_clock_deadline_ns_all(QEMU_CLOCK_VIRTUAL,
+                                            QEMU_TIMER_ATTR_ALL);
         }
         qtest_clock_warp(qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + ns);
         qtest_send_prefix(chr);
         qtest_sendf(chr, "OK %"PRIi64"\n",
                     (int64_t)qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL));
+    } else if (strcmp(words[0], "module_load") == 0) {
+        g_assert(words[1] && words[2]);
+
+        qtest_send_prefix(chr);
+        if (module_load_one(words[1], words[2])) {
+            qtest_sendf(chr, "OK\n");
+        } else {
+            qtest_sendf(chr, "FAIL\n");
+        }
     } else if (qtest_enabled() && strcmp(words[0], "clock_set") == 0) {
         int64_t ns;
+        int ret;
 
         g_assert(words[1]);
-        g_assert(qemu_strtoi64(words[1], NULL, 0, &ns) == 0);
+        ret = qemu_strtoi64(words[1], NULL, 0, &ns);
+        g_assert(ret == 0);
         qtest_clock_warp(ns);
         qtest_send_prefix(chr);
         qtest_sendf(chr, "OK %"PRIi64"\n",
@@ -623,7 +727,7 @@ static int qtest_can_read(void *opaque)
     return 1024;
 }
 
-static void qtest_event(void *opaque, int event)
+static void qtest_event(void *opaque, QEMUChrEvent event)
 {
     int i;
 
@@ -658,22 +762,11 @@ static void qtest_event(void *opaque, int event)
         break;
     }
 }
-
-static int qtest_init_accel(MachineState *ms)
-{
-    QemuOpts *opts = qemu_opts_create(qemu_find_opts("icount"), NULL, 0,
-                                      &error_abort);
-    qemu_opt_set(opts, "shift", "0", &error_abort);
-    configure_icount(opts, &error_abort);
-    qemu_opts_del(opts);
-    return 0;
-}
-
-void qtest_init(const char *qtest_chrdev, const char *qtest_log, Error **errp)
+void qtest_server_init(const char *qtest_chrdev, const char *qtest_log, Error **errp)
 {
     Chardev *chr;
 
-    chr = qemu_chr_new("qtest", qtest_chrdev);
+    chr = qemu_chr_new("qtest", qtest_chrdev, NULL);
 
     if (chr == NULL) {
         error_setg(errp, "Failed to initialize device for qtest: \"%s\"",
@@ -691,10 +784,21 @@ void qtest_init(const char *qtest_chrdev, const char *qtest_log, Error **errp)
 
     qemu_chr_fe_init(&qtest_chr, chr, errp);
     qemu_chr_fe_set_handlers(&qtest_chr, qtest_can_read, qtest_read,
-                             qtest_event, &qtest_chr, NULL, true);
+                             qtest_event, NULL, &qtest_chr, NULL, true);
     qemu_chr_fe_set_echo(&qtest_chr, true);
 
     inbuf = g_string_new("");
+
+    if (!qtest_server_send) {
+        qtest_server_set_send_handler(qtest_server_char_be_send, &qtest_chr);
+    }
+}
+
+void qtest_server_set_send_handler(void (*send)(void*, const char*),
+                                   void *opaque)
+{
+    qtest_server_send = send;
+    qtest_server_send_opaque = opaque;
 }
 
 bool qtest_driver(void)
@@ -702,26 +806,15 @@ bool qtest_driver(void)
     return qtest_chr.chr != NULL;
 }
 
-static void qtest_accel_class_init(ObjectClass *oc, void *data)
+void qtest_server_inproc_recv(void *dummy, const char *buf)
 {
-    AccelClass *ac = ACCEL_CLASS(oc);
-    ac->name = "QTest";
-    ac->available = qtest_available;
-    ac->init_machine = qtest_init_accel;
-    ac->allowed = &qtest_allowed;
+    static GString *gstr;
+    if (!gstr) {
+        gstr = g_string_new(NULL);
+    }
+    g_string_append(gstr, buf);
+    if (gstr->str[gstr->len - 1] == '\n') {
+        qtest_process_inbuf(NULL, gstr);
+        g_string_truncate(gstr, 0);
+    }
 }
-
-#define TYPE_QTEST_ACCEL ACCEL_CLASS_NAME("qtest")
-
-static const TypeInfo qtest_accel_type = {
-    .name = TYPE_QTEST_ACCEL,
-    .parent = TYPE_ACCEL,
-    .class_init = qtest_accel_class_init,
-};
-
-static void qtest_type_init(void)
-{
-    type_register_static(&qtest_accel_type);
-}
-
-type_init(qtest_type_init);

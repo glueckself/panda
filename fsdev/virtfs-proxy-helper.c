@@ -13,7 +13,6 @@
 #include <sys/resource.h>
 #include <getopt.h>
 #include <syslog.h>
-#include <sys/capability.h>
 #include <sys/fsuid.h>
 #include <sys/vfs.h>
 #include <sys/ioctl.h>
@@ -21,6 +20,7 @@
 #ifdef CONFIG_LINUX_MAGIC_H
 #include <linux/magic.h>
 #endif
+#include <cap-ng.h>
 #include "qemu-common.h"
 #include "qemu/sockets.h"
 #include "qemu/xattr.h"
@@ -43,7 +43,7 @@
 #define BTRFS_SUPER_MAGIC 0x9123683E
 #endif
 
-static struct option helper_opts[] = {
+static const struct option helper_opts[] = {
     {"fd", required_argument, NULL, 'f'},
     {"path", required_argument, NULL, 'p'},
     {"nodaemon", no_argument, NULL, 'n'},
@@ -55,6 +55,7 @@ static struct option helper_opts[] = {
 
 static bool is_daemon;
 static bool get_version; /* IOC getversion IOCTL supported */
+static char *prog_name;
 
 static void GCC_FMT_ATTR(2, 3) do_log(int loglevel, const char *format, ...)
 {
@@ -78,49 +79,10 @@ static void do_perror(const char *string)
     }
 }
 
-static int do_cap_set(cap_value_t *cap_value, int size, int reset)
-{
-    cap_t caps;
-    if (reset) {
-        /*
-         * Start with an empty set and set permitted and effective
-         */
-        caps = cap_init();
-        if (caps == NULL) {
-            do_perror("cap_init");
-            return -1;
-        }
-        if (cap_set_flag(caps, CAP_PERMITTED, size, cap_value, CAP_SET) < 0) {
-            do_perror("cap_set_flag");
-            goto error;
-        }
-    } else {
-        caps = cap_get_proc();
-        if (!caps) {
-            do_perror("cap_get_proc");
-            return -1;
-        }
-    }
-    if (cap_set_flag(caps, CAP_EFFECTIVE, size, cap_value, CAP_SET) < 0) {
-        do_perror("cap_set_flag");
-        goto error;
-    }
-    if (cap_set_proc(caps) < 0) {
-        do_perror("cap_set_proc");
-        goto error;
-    }
-    cap_free(caps);
-    return 0;
-
-error:
-    cap_free(caps);
-    return -1;
-}
-
 static int init_capabilities(void)
 {
     /* helper needs following capabilities only */
-    cap_value_t cap_list[] = {
+    int cap_list[] = {
         CAP_CHOWN,
         CAP_DAC_OVERRIDE,
         CAP_FOWNER,
@@ -129,7 +91,34 @@ static int init_capabilities(void)
         CAP_MKNOD,
         CAP_SETUID,
     };
-    return do_cap_set(cap_list, ARRAY_SIZE(cap_list), 1);
+    int i;
+
+    capng_clear(CAPNG_SELECT_BOTH);
+    for (i = 0; i < ARRAY_SIZE(cap_list); i++) {
+        if (capng_update(CAPNG_ADD, CAPNG_EFFECTIVE | CAPNG_PERMITTED,
+                         cap_list[i]) < 0) {
+            do_perror("capng_update");
+            return -1;
+        }
+    }
+    if (capng_apply(CAPNG_SELECT_BOTH) < 0) {
+        do_perror("capng_apply");
+        return -1;
+    }
+
+    /* Prepare effective set for setugid.  */
+    for (i = 0; i < ARRAY_SIZE(cap_list); i++) {
+        if (cap_list[i] == CAP_DAC_OVERRIDE) {
+            continue;
+        }
+
+        if (capng_update(CAPNG_DROP, CAPNG_EFFECTIVE,
+                         cap_list[i]) < 0) {
+            do_perror("capng_update");
+            return -1;
+        }
+    }
+    return 0;
 }
 
 static int socket_read(int sockfd, void *buff, ssize_t size)
@@ -294,20 +283,11 @@ static int setugid(int uid, int gid, int *suid, int *sgid)
 {
     int retval;
 
-    /*
-     * We still need DAC_OVERRIDE because we don't change
-     * supplementary group ids, and hence may be subjected DAC rules
-     */
-    cap_value_t cap_list[] = {
-        CAP_DAC_OVERRIDE,
-    };
-
     *suid = geteuid();
     *sgid = getegid();
 
     if (setresgid(-1, gid, *sgid) == -1) {
-        retval = -errno;
-        goto err_out;
+        return -errno;
     }
 
     if (setresuid(-1, uid, *suid) == -1) {
@@ -315,11 +295,21 @@ static int setugid(int uid, int gid, int *suid, int *sgid)
         goto err_sgid;
     }
 
-    if (uid != 0 || gid != 0) {
-        if (do_cap_set(cap_list, ARRAY_SIZE(cap_list), 0) < 0) {
-            retval = -errno;
-            goto err_suid;
-        }
+    if (uid == 0 && gid == 0) {
+        /* Linux has already copied the permitted set to the effective set.  */
+        return 0;
+    }
+
+    /*
+     * All capabilities have been cleared from the effective set.  However
+     * we still need DAC_OVERRIDE because we don't change supplementary
+     * group ids, and hence may be subject to DAC rules.  init_capabilities
+     * left the set of capabilities that we want in libcap-ng's state.
+     */
+    if (capng_apply(CAPNG_SELECT_CAPS) < 0) {
+        retval = -errno;
+        do_perror("capng_apply");
+        goto err_suid;
     }
     return 0;
 
@@ -331,7 +321,6 @@ err_sgid:
     if (setresgid(-1, *sgid, *sgid) == -1) {
         abort();
     }
-err_out:
     return retval;
 }
 
@@ -785,7 +774,7 @@ error:
     return -1;
 }
 
-static void usage(char *prog)
+static void usage(void)
 {
     fprintf(stderr, "usage: %s\n"
             " -p|--path <path> 9p path to export\n"
@@ -795,7 +784,7 @@ static void usage(char *prog)
             " access to this socket\n"
             " \tNote: -s & -f can not be used together\n"
             " [-n|--nodaemon] Run as a normal program\n",
-            basename(prog));
+            prog_name);
 }
 
 static int process_reply(int sock, int type,
@@ -945,7 +934,8 @@ static int process_requests(int sock)
                                      &spec[0].tv_sec, &spec[0].tv_nsec,
                                      &spec[1].tv_sec, &spec[1].tv_nsec);
             if (retval > 0) {
-                retval = qemu_utimens(path.data, spec);
+                retval = utimensat(AT_FDCWD, path.data, spec,
+                                   AT_SYMLINK_NOFOLLOW);
                 if (retval < 0) {
                     retval = -errno;
                 }
@@ -1044,6 +1034,8 @@ int main(int argc, char **argv)
     struct statfs st_fs;
 #endif
 
+    prog_name = g_path_get_basename(argv[0]);
+
     is_daemon = true;
     sock = -1;
     own_u = own_g = -1;
@@ -1076,7 +1068,7 @@ int main(int argc, char **argv)
         case '?':
         case 'h':
         default:
-            usage(argv[0]);
+            usage();
             exit(EXIT_FAILURE);
         }
     }
@@ -1084,13 +1076,13 @@ int main(int argc, char **argv)
     /* Parameter validation */
     if ((sock_name == NULL && sock == -1) || rpath == NULL) {
         fprintf(stderr, "socket, socket descriptor or path not specified\n");
-        usage(argv[0]);
+        usage();
         return -1;
     }
 
     if (sock_name && sock != -1) {
         fprintf(stderr, "both named socket and socket descriptor specified\n");
-        usage(argv[0]);
+        usage();
         exit(EXIT_FAILURE);
     }
 
@@ -1098,7 +1090,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "owner uid:gid not specified, ");
         fprintf(stderr,
                 "owner uid:gid specifies who can access the socket file\n");
-        usage(argv[0]);
+        usage();
         exit(EXIT_FAILURE);
     }
 
@@ -1129,12 +1121,12 @@ int main(int argc, char **argv)
         }
     }
 
-    if (chdir("/") < 0) {
-        do_perror("chdir");
-        goto error;
-    }
     if (chroot(rpath) < 0) {
         do_perror("chroot");
+        goto error;
+    }
+    if (chdir("/") < 0) {
+        do_perror("chdir");
         goto error;
     }
 
@@ -1161,6 +1153,8 @@ int main(int argc, char **argv)
 
     process_requests(sock);
 error:
+    g_free(rpath);
+    g_free(sock_name);
     do_log(LOG_INFO, "Done\n");
     closelog();
     return 0;

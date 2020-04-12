@@ -53,13 +53,17 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/log.h"
+#include "hw/hw.h"
 #include "hw/sysbus.h"
+#include "migration/vmstate.h"
 #include "qemu/timer.h"
-#include "qemu/main-loop.h"
-#include "qemu-common.h"
+#include "qemu/module.h"
 #include "hw/ptimer.h"
 
 #include "hw/arm/exynos4210.h"
+#include "hw/hw.h"
+#include "hw/irq.h"
 
 //#define DEBUG_MCT
 
@@ -172,12 +176,9 @@ enum LocalTimerRegCntIndexes {
     L_REG_CNT_AMOUNT
 };
 
-#define MCT_NIRQ                6
 #define MCT_SFR_SIZE            0x444
 
 #define MCT_GT_CMP_NUM          4
-
-#define MCT_GT_MAX_VAL          UINT64_MAX
 
 #define MCT_GT_COUNTER_STEP     0x100000000ULL
 #define MCT_LT_COUNTER_STEP     0x100000000ULL
@@ -362,6 +363,7 @@ static void exynos4210_mct_update_freq(Exynos4210MCTState *s);
 
 /*
  * Set counter of FRC global timer.
+ * Must be called within exynos4210_gfrc_tx_begin/commit block.
  */
 static void exynos4210_gfrc_set_count(Exynos4210MCTGT *s, uint64_t count)
 {
@@ -383,6 +385,7 @@ static uint64_t exynos4210_gfrc_get_count(Exynos4210MCTGT *s)
 
 /*
  * Stop global FRC timer
+ * Must be called within exynos4210_gfrc_tx_begin/commit block.
  */
 static void exynos4210_gfrc_stop(Exynos4210MCTGT *s)
 {
@@ -393,12 +396,28 @@ static void exynos4210_gfrc_stop(Exynos4210MCTGT *s)
 
 /*
  * Start global FRC timer
+ * Must be called within exynos4210_gfrc_tx_begin/commit block.
  */
 static void exynos4210_gfrc_start(Exynos4210MCTGT *s)
 {
     DPRINTF("global timer frc start\n");
 
     ptimer_run(s->ptimer_frc, 1);
+}
+
+/*
+ * Start ptimer transaction for global FRC timer; this is just for
+ * consistency with the way we wrap operations like stop and run.
+ */
+static void exynos4210_gfrc_tx_begin(Exynos4210MCTGT *s)
+{
+    ptimer_transaction_begin(s->ptimer_frc);
+}
+
+/* Commit ptimer transaction for global FRC timer. */
+static void exynos4210_gfrc_tx_commit(Exynos4210MCTGT *s)
+{
+    ptimer_transaction_commit(s->ptimer_frc);
 }
 
 /*
@@ -490,6 +509,7 @@ static uint64_t exynos4210_gcomp_get_distance(Exynos4210MCTState *s, int32_t id)
 
 /*
  * Restart global FRC timer
+ * Must be called within exynos4210_gfrc_tx_begin/commit block.
  */
 static void exynos4210_gfrc_restart(Exynos4210MCTState *s)
 {
@@ -587,6 +607,7 @@ static uint64_t exynos4210_lfrc_get_count(Exynos4210MCTLT *s)
 
 /*
  * Set counter of FRC local timer.
+ * Must be called from within exynos4210_lfrc_tx_begin/commit block.
  */
 static void exynos4210_lfrc_update_count(Exynos4210MCTLT *s)
 {
@@ -599,6 +620,7 @@ static void exynos4210_lfrc_update_count(Exynos4210MCTLT *s)
 
 /*
  * Start local FRC timer
+ * Must be called from within exynos4210_lfrc_tx_begin/commit block.
  */
 static void exynos4210_lfrc_start(Exynos4210MCTLT *s)
 {
@@ -607,10 +629,23 @@ static void exynos4210_lfrc_start(Exynos4210MCTLT *s)
 
 /*
  * Stop local FRC timer
+ * Must be called from within exynos4210_lfrc_tx_begin/commit block.
  */
 static void exynos4210_lfrc_stop(Exynos4210MCTLT *s)
 {
     ptimer_stop(s->ptimer_frc);
+}
+
+/* Start ptimer transaction for local FRC timer */
+static void exynos4210_lfrc_tx_begin(Exynos4210MCTLT *s)
+{
+    ptimer_transaction_begin(s->ptimer_frc);
+}
+
+/* Commit ptimer transaction for local FRC timer */
+static void exynos4210_lfrc_tx_commit(Exynos4210MCTLT *s)
+{
+    ptimer_transaction_commit(s->ptimer_frc);
 }
 
 /*
@@ -699,6 +734,7 @@ static uint32_t exynos4210_ltick_int_get_cnto(struct tick_timer *s)
 
 /*
  * Start local tick cnt timer.
+ * Must be called within exynos4210_ltick_tx_begin/commit block.
  */
 static void exynos4210_ltick_cnt_start(struct tick_timer *s)
 {
@@ -714,6 +750,7 @@ static void exynos4210_ltick_cnt_start(struct tick_timer *s)
 
 /*
  * Stop local tick cnt timer.
+ * Must be called within exynos4210_ltick_tx_begin/commit block.
  */
 static void exynos4210_ltick_cnt_stop(struct tick_timer *s)
 {
@@ -729,6 +766,18 @@ static void exynos4210_ltick_cnt_stop(struct tick_timer *s)
 
         s->cnt_run = 0;
     }
+}
+
+/* Start ptimer transaction for local tick timer */
+static void exynos4210_ltick_tx_begin(struct tick_timer *s)
+{
+    ptimer_transaction_begin(s->ptimer_tick);
+}
+
+/* Commit ptimer transaction for local tick timer */
+static void exynos4210_ltick_tx_commit(struct tick_timer *s)
+{
+    ptimer_transaction_commit(s->ptimer_tick);
 }
 
 /*
@@ -776,6 +825,7 @@ static uint32_t exynos4210_ltick_cnt_get_cnto(struct tick_timer *s)
 
 /*
  * Set new values of counters for CNT and INT timers
+ * Must be called within exynos4210_ltick_tx_begin/commit block.
  */
 static void exynos4210_ltick_set_cntb(struct tick_timer *s, uint32_t new_cnt,
         uint32_t new_int)
@@ -849,7 +899,9 @@ static void exynos4210_ltick_recalc_count(struct tick_timer *s)
 static void exynos4210_ltick_timer_init(struct tick_timer *s)
 {
     exynos4210_ltick_int_stop(s);
+    exynos4210_ltick_tx_begin(s);
     exynos4210_ltick_cnt_stop(s);
+    exynos4210_ltick_tx_commit(s);
 
     s->count = 0;
     s->distance = 0;
@@ -931,25 +983,38 @@ static void exynos4210_ltick_event(void *opaque)
     exynos4210_ltick_int_start(&s->tick_timer);
 }
 
+static void tx_ptimer_set_freq(ptimer_state *s, uint32_t freq)
+{
+    /*
+     * callers of exynos4210_mct_update_freq() never do anything
+     * else that needs to be in the same ptimer transaction, so
+     * to avoid a lot of repetition we have a convenience function
+     * for begin/set_freq/commit.
+     */
+    ptimer_transaction_begin(s);
+    ptimer_set_freq(s, freq);
+    ptimer_transaction_commit(s);
+}
+
 /* update timer frequency */
 static void exynos4210_mct_update_freq(Exynos4210MCTState *s)
 {
     uint32_t freq = s->freq;
     s->freq = 24000000 /
-            ((MCT_CFG_GET_PRESCALER(s->reg_mct_cfg)+1) *
+            ((MCT_CFG_GET_PRESCALER(s->reg_mct_cfg) + 1) *
                     MCT_CFG_GET_DIVIDER(s->reg_mct_cfg));
 
     if (freq != s->freq) {
         DPRINTF("freq=%dHz\n", s->freq);
 
         /* global timer */
-        ptimer_set_freq(s->g_timer.ptimer_frc, s->freq);
+        tx_ptimer_set_freq(s->g_timer.ptimer_frc, s->freq);
 
         /* local timer */
-        ptimer_set_freq(s->l_timer[0].tick_timer.ptimer_tick, s->freq);
-        ptimer_set_freq(s->l_timer[0].ptimer_frc, s->freq);
-        ptimer_set_freq(s->l_timer[1].tick_timer.ptimer_tick, s->freq);
-        ptimer_set_freq(s->l_timer[1].ptimer_frc, s->freq);
+        tx_ptimer_set_freq(s->l_timer[0].tick_timer.ptimer_tick, s->freq);
+        tx_ptimer_set_freq(s->l_timer[0].ptimer_frc, s->freq);
+        tx_ptimer_set_freq(s->l_timer[1].tick_timer.ptimer_tick, s->freq);
+        tx_ptimer_set_freq(s->l_timer[1].ptimer_frc, s->freq);
     }
 }
 
@@ -963,7 +1028,9 @@ static void exynos4210_mct_reset(DeviceState *d)
 
     /* global timer */
     memset(&s->g_timer.reg, 0, sizeof(s->g_timer.reg));
+    exynos4210_gfrc_tx_begin(&s->g_timer);
     exynos4210_gfrc_stop(&s->g_timer);
+    exynos4210_gfrc_tx_commit(&s->g_timer);
 
     /* local timer */
     memset(s->l_timer[0].reg.cnt, 0, sizeof(s->l_timer[0].reg.cnt));
@@ -976,7 +1043,9 @@ static void exynos4210_mct_reset(DeviceState *d)
         s->l_timer[i].tick_timer.count = 0;
         s->l_timer[i].tick_timer.distance = 0;
         s->l_timer[i].tick_timer.progress = 0;
+        exynos4210_lfrc_tx_begin(&s->l_timer[i]);
         ptimer_stop(s->l_timer[i].ptimer_frc);
+        exynos4210_lfrc_tx_commit(&s->l_timer[i]);
 
         exynos4210_ltick_timer_init(&s->l_timer[i].tick_timer);
     }
@@ -1015,9 +1084,9 @@ static uint64_t exynos4210_mct_read(void *opaque, hwaddr offset,
 
     case G_COMP_L(0): case G_COMP_L(1): case G_COMP_L(2): case G_COMP_L(3):
     case G_COMP_U(0): case G_COMP_U(1): case G_COMP_U(2): case G_COMP_U(3):
-    index = GET_G_COMP_IDX(offset);
-    shift = 8 * (offset & 0x4);
-    value = UINT32_MAX & (s->g_timer.reg.comp[index] >> shift);
+        index = GET_G_COMP_IDX(offset);
+        shift = 8 * (offset & 0x4);
+        value = UINT32_MAX & (s->g_timer.reg.comp[index] >> shift);
     break;
 
     case G_TCON:
@@ -1066,7 +1135,6 @@ static uint64_t exynos4210_mct_read(void *opaque, hwaddr offset,
         lt_i = GET_L_TIMER_IDX(offset);
 
         value = exynos4210_lfrc_get_count(&s->l_timer[lt_i]);
-
         break;
 
     case L0_TCON: case L1_TCON:
@@ -1143,7 +1211,9 @@ static void exynos4210_mct_write(void *opaque, hwaddr offset,
         }
 
         s->g_timer.reg.cnt = new_frc;
+        exynos4210_gfrc_tx_begin(&s->g_timer);
         exynos4210_gfrc_restart(s);
+        exynos4210_gfrc_tx_commit(&s->g_timer);
         break;
 
     case G_CNT_WSTAT:
@@ -1152,23 +1222,25 @@ static void exynos4210_mct_write(void *opaque, hwaddr offset,
 
     case G_COMP_L(0): case G_COMP_L(1): case G_COMP_L(2): case G_COMP_L(3):
     case G_COMP_U(0): case G_COMP_U(1): case G_COMP_U(2): case G_COMP_U(3):
-    index = GET_G_COMP_IDX(offset);
-    shift = 8 * (offset & 0x4);
-    s->g_timer.reg.comp[index] =
-            (s->g_timer.reg.comp[index] &
-            (((uint64_t)UINT32_MAX << 32) >> shift)) +
-            (value << shift);
+        index = GET_G_COMP_IDX(offset);
+        shift = 8 * (offset & 0x4);
+        s->g_timer.reg.comp[index] =
+                (s->g_timer.reg.comp[index] &
+                (((uint64_t)UINT32_MAX << 32) >> shift)) +
+                (value << shift);
 
-    DPRINTF("comparator %d write 0x%llx val << %d\n", index, value, shift);
+        DPRINTF("comparator %d write 0x%llx val << %d\n", index, value, shift);
 
-    if (offset&0x4) {
-        s->g_timer.reg.wstat |= G_WSTAT_COMP_U(index);
-    } else {
-        s->g_timer.reg.wstat |= G_WSTAT_COMP_L(index);
-    }
+        if (offset & 0x4) {
+            s->g_timer.reg.wstat |= G_WSTAT_COMP_U(index);
+        } else {
+            s->g_timer.reg.wstat |= G_WSTAT_COMP_L(index);
+        }
 
-    exynos4210_gfrc_restart(s);
-    break;
+        exynos4210_gfrc_tx_begin(&s->g_timer);
+        exynos4210_gfrc_restart(s);
+        exynos4210_gfrc_tx_commit(&s->g_timer);
+        break;
 
     case G_TCON:
         old_val = s->g_timer.reg.tcon;
@@ -1177,10 +1249,12 @@ static void exynos4210_mct_write(void *opaque, hwaddr offset,
 
         DPRINTF("global timer write to reg.g_tcon %llx\n", value);
 
+        exynos4210_gfrc_tx_begin(&s->g_timer);
+
         /* Start FRC if transition from disabled to enabled */
         if ((value & G_TCON_TIMER_ENABLE) > (old_val &
                 G_TCON_TIMER_ENABLE)) {
-            exynos4210_gfrc_start(&s->g_timer);
+            exynos4210_gfrc_restart(s);
         }
         if ((value & G_TCON_TIMER_ENABLE) < (old_val &
                 G_TCON_TIMER_ENABLE)) {
@@ -1194,6 +1268,8 @@ static void exynos4210_mct_write(void *opaque, hwaddr offset,
                 exynos4210_gfrc_restart(s);
             }
         }
+
+        exynos4210_gfrc_tx_commit(&s->g_timer);
         break;
 
     case G_INT_CSTAT:
@@ -1206,7 +1282,6 @@ static void exynos4210_mct_write(void *opaque, hwaddr offset,
         break;
 
     case G_INT_ENB:
-
         /* Raise IRQ if transition from disabled to enabled and CSTAT pending */
         for (i = 0; i < MCT_GT_CMP_NUM; i++) {
             if ((value & G_INT_ENABLE(i)) > (s->g_timer.reg.tcon &
@@ -1245,6 +1320,7 @@ static void exynos4210_mct_write(void *opaque, hwaddr offset,
         s->l_timer[lt_i].reg.wstat |= L_WSTAT_TCON_WRITE;
         s->l_timer[lt_i].reg.tcon = value;
 
+        exynos4210_ltick_tx_begin(&s->l_timer[lt_i].tick_timer);
         /* Stop local CNT */
         if ((value & L_TCON_TICK_START) <
                 (old_val & L_TCON_TICK_START)) {
@@ -1272,8 +1348,10 @@ static void exynos4210_mct_write(void *opaque, hwaddr offset,
             DPRINTF("local timer[%d] start int\n", lt_i);
             exynos4210_ltick_int_start(&s->l_timer[lt_i].tick_timer);
         }
+        exynos4210_ltick_tx_commit(&s->l_timer[lt_i].tick_timer);
 
         /* Start or Stop local FRC if TCON changed */
+        exynos4210_lfrc_tx_begin(&s->l_timer[lt_i]);
         if ((value & L_TCON_FRC_START) >
         (s->l_timer[lt_i].reg.tcon & L_TCON_FRC_START)) {
             DPRINTF("local timer[%d] start frc\n", lt_i);
@@ -1284,10 +1362,10 @@ static void exynos4210_mct_write(void *opaque, hwaddr offset,
             DPRINTF("local timer[%d] stop frc\n", lt_i);
             exynos4210_lfrc_stop(&s->l_timer[lt_i]);
         }
+        exynos4210_lfrc_tx_commit(&s->l_timer[lt_i]);
         break;
 
     case L0_TCNTB: case L1_TCNTB:
-
         lt_i = GET_L_TIMER_IDX(offset);
         index = GET_L_TIMER_CNT_REG_IDX(offset, lt_i);
 
@@ -1296,8 +1374,10 @@ static void exynos4210_mct_write(void *opaque, hwaddr offset,
          * Due to this we should reload timer to nearest moment when CNT is
          * expired and then in event handler update tcntb to new TCNTB value.
          */
+        exynos4210_ltick_tx_begin(&s->l_timer[lt_i].tick_timer);
         exynos4210_ltick_set_cntb(&s->l_timer[lt_i].tick_timer, value,
                 s->l_timer[lt_i].tick_timer.icntb);
+        exynos4210_ltick_tx_commit(&s->l_timer[lt_i].tick_timer);
 
         s->l_timer[lt_i].reg.wstat |= L_WSTAT_TCNTB_WRITE;
         s->l_timer[lt_i].reg.cnt[L_REG_CNT_TCNTB] = value;
@@ -1315,7 +1395,6 @@ static void exynos4210_mct_write(void *opaque, hwaddr offset,
         break;
 
     case L0_ICNTB: case L1_ICNTB:
-
         lt_i = GET_L_TIMER_IDX(offset);
         index = GET_L_TIMER_CNT_REG_IDX(offset, lt_i);
 
@@ -1352,13 +1431,12 @@ static void exynos4210_mct_write(void *opaque, hwaddr offset,
         if (icntb_max[lt_i] < value) {
             icntb_max[lt_i] = value;
         }
-DPRINTF("local timer[%d] ICNTB write %llx; max=%x, min=%x\n\n",
-        lt_i, value, icntb_max[lt_i], icntb_min[lt_i]);
+        DPRINTF("local timer[%d] ICNTB write %llx; max=%x, min=%x\n\n",
+                lt_i, value, icntb_max[lt_i], icntb_min[lt_i]);
 #endif
-break;
+        break;
 
     case L0_FRCNTB: case L1_FRCNTB:
-
         lt_i = GET_L_TIMER_IDX(offset);
         index = GET_L_TIMER_CNT_REG_IDX(offset, lt_i);
 
@@ -1372,8 +1450,9 @@ break;
     case L0_TCNTO: case L1_TCNTO:
     case L0_ICNTO: case L1_ICNTO:
     case L0_FRCNTO: case L1_FRCNTO:
-        fprintf(stderr, "\n[exynos4210.mct: write to RO register "
-                TARGET_FMT_plx "]\n\n", offset);
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "exynos4210.mct: write to RO register " TARGET_FMT_plx,
+                      offset);
         break;
 
     case L0_INT_CSTAT: case L1_INT_CSTAT:
@@ -1427,20 +1506,20 @@ static void exynos4210_mct_init(Object *obj)
     int i;
     Exynos4210MCTState *s = EXYNOS4210_MCT(obj);
     SysBusDevice *dev = SYS_BUS_DEVICE(obj);
-    QEMUBH *bh[2];
 
     /* Global timer */
-    bh[0] = qemu_bh_new(exynos4210_gfrc_event, s);
-    s->g_timer.ptimer_frc = ptimer_init(bh[0], PTIMER_POLICY_DEFAULT);
+    s->g_timer.ptimer_frc = ptimer_init(exynos4210_gfrc_event, s,
+                                        PTIMER_POLICY_DEFAULT);
     memset(&s->g_timer.reg, 0, sizeof(struct gregs));
 
     /* Local timers */
     for (i = 0; i < 2; i++) {
-        bh[0] = qemu_bh_new(exynos4210_ltick_event, &s->l_timer[i]);
-        bh[1] = qemu_bh_new(exynos4210_lfrc_event, &s->l_timer[i]);
         s->l_timer[i].tick_timer.ptimer_tick =
-                                   ptimer_init(bh[0], PTIMER_POLICY_DEFAULT);
-        s->l_timer[i].ptimer_frc = ptimer_init(bh[1], PTIMER_POLICY_DEFAULT);
+            ptimer_init(exynos4210_ltick_event, &s->l_timer[i],
+                        PTIMER_POLICY_DEFAULT);
+        s->l_timer[i].ptimer_frc =
+            ptimer_init(exynos4210_lfrc_event, &s->l_timer[i],
+                        PTIMER_POLICY_DEFAULT);
         s->l_timer[i].id = i;
     }
 

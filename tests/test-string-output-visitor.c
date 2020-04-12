@@ -15,9 +15,7 @@
 #include "qemu-common.h"
 #include "qapi/error.h"
 #include "qapi/string-output-visitor.h"
-#include "test-qapi-types.h"
 #include "test-qapi-visit.h"
-#include "qapi/qmp/types.h"
 
 typedef struct TestOutputVisitorData {
     Visitor *ov;
@@ -97,7 +95,7 @@ static void test_visitor_out_intList(TestOutputVisitorData *data,
     Error *err = NULL;
     char *str;
 
-    for (i = 0; i < sizeof(value) / sizeof(value[0]); i++) {
+    for (i = 0; i < ARRAY_SIZE(value); i++) {
         *tmp = g_malloc0(sizeof(**tmp));
         (*tmp)->value = value[i];
         tmp = &(*tmp)->next;
@@ -194,12 +192,12 @@ static void test_visitor_out_enum(TestOutputVisitorData *data,
 
         str = visitor_get(data);
         if (data->human) {
-            char *str_human = g_strdup_printf("\"%s\"", EnumOne_lookup[i]);
+            char *str_human = g_strdup_printf("\"%s\"", EnumOne_str(i));
 
             g_assert_cmpstr(str, ==, str_human);
             g_free(str_human);
         } else {
-            g_assert_cmpstr(str, ==, EnumOne_lookup[i]);
+            g_assert_cmpstr(str, ==, EnumOne_str(i));
         }
         visitor_reset(data);
     }
@@ -209,10 +207,10 @@ static void test_visitor_out_enum_errors(TestOutputVisitorData *data,
                                          const void *unused)
 {
     EnumOne i, bad_values[] = { ENUM_ONE__MAX, -1 };
-    Error *err;
 
     for (i = 0; i < ARRAY_SIZE(bad_values) ; i++) {
-        err = NULL;
+        Error *err = NULL;
+
         visit_type_EnumOne(data->ov, "unused", &bad_values[i], &err);
         error_free_or_abort(&err);
     }

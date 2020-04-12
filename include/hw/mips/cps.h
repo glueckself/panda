@@ -25,6 +25,7 @@
 #include "hw/intc/mips_gic.h"
 #include "hw/misc/mips_cpc.h"
 #include "hw/misc/mips_itu.h"
+#include "target/mips/cpu.h"
 
 #define TYPE_MIPS_CPS "mips-cps"
 #define MIPS_CPS(obj) OBJECT_CHECK(MIPSCPSState, (obj), TYPE_MIPS_CPS)
@@ -34,7 +35,7 @@ typedef struct MIPSCPSState {
 
     uint32_t num_vp;
     uint32_t num_irq;
-    char *cpu_model;
+    char *cpu_type;
 
     MemoryRegion container;
     MIPSGCRState gcr;

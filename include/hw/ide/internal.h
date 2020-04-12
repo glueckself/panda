@@ -6,17 +6,16 @@
  * only files in hw/ide/ are supposed to include this file.
  * non-internal declarations are in hw/ide.h
  */
+
+#include "qapi/qapi-types-run-state.h"
 #include "hw/ide.h"
+#include "hw/irq.h"
 #include "hw/isa/isa.h"
 #include "sysemu/dma.h"
-#include "sysemu/sysemu.h"
 #include "hw/block/block.h"
-#include "block/scsi.h"
+#include "scsi/constants.h"
 
 /* debug IDE devices */
-//#define DEBUG_IDE
-//#define DEBUG_IDE_ATAPI
-//#define DEBUG_AIO
 #define USE_DMA_CDROM
 
 typedef struct IDEBus IDEBus;
@@ -27,6 +26,8 @@ typedef struct IDEDMAOps IDEDMAOps;
 
 #define TYPE_IDE_BUS "IDE"
 #define IDE_BUS(obj) OBJECT_CHECK(IDEBus, (obj), TYPE_IDE_BUS)
+
+#define MAX_IDE_DEVS 2
 
 /* Bits of HD_STATUS */
 #define ERR_STAT		0x01
@@ -323,11 +324,10 @@ typedef void EndTransferFunc(IDEState *);
 
 typedef void DMAStartFunc(IDEDMA *, IDEState *, BlockCompletionFunc *);
 typedef void DMAVoidFunc(IDEDMA *);
-typedef int DMAIntFunc(IDEDMA *, int);
+typedef int DMAIntFunc(IDEDMA *, bool);
 typedef int32_t DMAInt32Func(IDEDMA *, int32_t len);
 typedef void DMAu32Func(IDEDMA *, uint32_t);
 typedef void DMAStopFunc(IDEDMA *, bool);
-typedef void DMARestartFunc(void *, int, RunState);
 
 struct unreported_events {
     bool eject_request;
@@ -335,18 +335,20 @@ struct unreported_events {
 };
 
 enum ide_dma_cmd {
-    IDE_DMA_READ,
+    IDE_DMA_READ = 0,
     IDE_DMA_WRITE,
     IDE_DMA_TRIM,
     IDE_DMA_ATAPI,
+    IDE_DMA__COUNT
 };
 
+extern const char *IDE_DMA_CMD_lookup[IDE_DMA__COUNT];
+
 #define ide_cmd_is_read(s) \
-	((s)->dma_cmd == IDE_DMA_READ)
+        ((s)->dma_cmd == IDE_DMA_READ)
 
 typedef struct IDEBufferedRequest {
     QLIST_ENTRY(IDEBufferedRequest) list;
-    struct iovec iov;
     QEMUIOVector qiov;
     QEMUIOVector *original_qiov;
     BlockCompletionFunc *original_cb;
@@ -405,7 +407,6 @@ struct IDEState {
     int atapi_dma; /* true if dma is requested for the packet cmd */
     BlockAcctCookie acct;
     BlockAIOCB *pio_aiocb;
-    struct iovec iov;
     QEMUIOVector qiov;
     QLIST_HEAD(, IDEBufferedRequest) buffered_requests;
     /* ATA DMA state */
@@ -444,7 +445,7 @@ struct IDEState {
 
 struct IDEDMAOps {
     DMAStartFunc *start_dma;
-    DMAVoidFunc *start_transfer;
+    DMAVoidFunc *pio_transfer;
     DMAInt32Func *prepare_buf;
     DMAu32Func *commit_buf;
     DMAIntFunc *rw_buf;
@@ -457,7 +458,6 @@ struct IDEDMAOps {
 
 struct IDEDMA {
     const struct IDEDMAOps *ops;
-    struct iovec iov;
     QEMUIOVector qiov;
     BlockAIOCB *aiocb;
 };
@@ -495,7 +495,7 @@ struct IDEBus {
 
 typedef struct IDEDeviceClass {
     DeviceClass parent_class;
-    int (*init)(IDEDevice *dev);
+    void (*realize)(IDEDevice *dev, Error **errp);
 } IDEDeviceClass;
 
 struct IDEDevice {
@@ -507,6 +507,14 @@ struct IDEDevice {
     char *serial;
     char *model;
     uint64_t wwn;
+    /*
+     * 0x0000        - rotation rate not reported
+     * 0x0001        - non-rotating medium (SSD)
+     * 0x0002-0x0400 - reserved
+     * 0x0401-0xffe  - rotations per minute
+     * 0xffff        - reserved
+     */
+    uint16_t rotation_rate;
 };
 
 /* These are used for the error_status field of IDEBus */
@@ -605,7 +613,7 @@ int ide_init_drive(IDEState *s, BlockBackend *blk, IDEDriveKind kind,
                    const char *version, const char *serial, const char *model,
                    uint64_t wwn,
                    uint32_t cylinders, uint32_t heads, uint32_t secs,
-                   int chs_trans);
+                   int chs_trans, Error **errp);
 void ide_init2(IDEBus *bus, qemu_irq irq);
 void ide_exit(IDEState *s);
 void ide_init_ioport(IDEBus *bus, ISADevice *isa, int iobase, int iobase2);
@@ -615,6 +623,8 @@ void ide_exec_cmd(IDEBus *bus, uint32_t val);
 
 void ide_transfer_start(IDEState *s, uint8_t *buf, int size,
                         EndTransferFunc *end_transfer_func);
+bool ide_transfer_start_norecurse(IDEState *s, uint8_t *buf, int size,
+                                  EndTransferFunc *end_transfer_func);
 void ide_transfer_stop(IDEState *s);
 void ide_set_inactive(IDEState *s, bool more);
 BlockAIOCB *ide_issue_trim(

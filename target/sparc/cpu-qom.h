@@ -20,7 +20,7 @@
 #ifndef QEMU_SPARC_CPU_QOM_H
 #define QEMU_SPARC_CPU_QOM_H
 
-#include "qom/cpu.h"
+#include "hw/core/cpu.h"
 
 #ifdef TARGET_SPARC64
 #define TYPE_SPARC_CPU "sparc64-cpu"
@@ -35,6 +35,7 @@
 #define SPARC_CPU_GET_CLASS(obj) \
     OBJECT_GET_CLASS(SPARCCPUClass, (obj), TYPE_SPARC_CPU)
 
+typedef struct sparc_def_t sparc_def_t;
 /**
  * SPARCCPUClass:
  * @parent_realize: The parent class' realize handler.
@@ -48,7 +49,8 @@ typedef struct SPARCCPUClass {
     /*< public >*/
 
     DeviceRealize parent_realize;
-    void (*parent_reset)(CPUState *cpu);
+    DeviceReset parent_reset;
+    sparc_def_t *cpu_def;
 } SPARCCPUClass;
 
 typedef struct SPARCCPU SPARCCPU;

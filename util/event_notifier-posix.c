@@ -14,7 +14,6 @@
 #include "qemu-common.h"
 #include "qemu/cutils.h"
 #include "qemu/event_notifier.h"
-#include "sysemu/char.h"
 #include "qemu/main-loop.h"
 
 #ifdef CONFIG_EVENTFD
@@ -81,8 +80,8 @@ void event_notifier_cleanup(EventNotifier *e)
 {
     if (e->rfd != e->wfd) {
         close(e->rfd);
-        e->rfd = -1;
     }
+    e->rfd = -1;
     close(e->wfd);
     e->wfd = -1;
 }

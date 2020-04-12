@@ -8,11 +8,15 @@
  */
 
 #include "qemu/osdep.h"
-#include "hw/hw.h"
+#include "hw/irq.h"
+#include "hw/qdev-properties.h"
 #include "qemu/timer.h"
-#include "sysemu/sysemu.h"
+#include "sysemu/runstate.h"
 #include "hw/arm/pxa.h"
 #include "hw/sysbus.h"
+#include "migration/vmstate.h"
+#include "qemu/log.h"
+#include "qemu/module.h"
 
 #define OSMR0	0x00
 #define OSMR1	0x04
@@ -252,8 +256,14 @@ static uint64_t pxa2xx_timer_read(void *opaque, hwaddr offset,
     case OSNR:
         return s->snapshot;
     default:
+        qemu_log_mask(LOG_UNIMP,
+                      "%s: unknown register 0x%02" HWADDR_PRIx "\n",
+                      __func__, offset);
+        break;
     badreg:
-        hw_error("pxa2xx_timer_read: Bad offset " REG_FMT "\n", offset);
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: incorrect register 0x%02" HWADDR_PRIx "\n",
+                      __func__, offset);
     }
 
     return 0;
@@ -377,8 +387,14 @@ static void pxa2xx_timer_write(void *opaque, hwaddr offset,
         }
         break;
     default:
+        qemu_log_mask(LOG_UNIMP,
+                      "%s: unknown register 0x%02" HWADDR_PRIx " "
+                      "(value 0x%08" PRIx64 ")\n",  __func__, offset, value);
+        break;
     badreg:
-        hw_error("pxa2xx_timer_write: Bad offset " REG_FMT "\n", offset);
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: incorrect register 0x%02" HWADDR_PRIx " "
+                      "(value 0x%08" PRIx64 ")\n", __func__, offset, value);
     }
 }
 
@@ -401,7 +417,7 @@ static void pxa2xx_timer_tick(void *opaque)
     if (t->num == 3)
         if (i->reset3 & 1) {
             i->reset3 = 0;
-            qemu_system_reset_request();
+            qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);
         }
 }
 
@@ -546,7 +562,7 @@ static void pxa25x_timer_dev_class_init(ObjectClass *klass, void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->desc = "PXA25x timer";
-    dc->props = pxa25x_timer_dev_properties;
+    device_class_set_props(dc, pxa25x_timer_dev_properties);
 }
 
 static const TypeInfo pxa25x_timer_dev_info = {
@@ -568,7 +584,7 @@ static void pxa27x_timer_dev_class_init(ObjectClass *klass, void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->desc = "PXA27x timer";
-    dc->props = pxa27x_timer_dev_properties;
+    device_class_set_props(dc, pxa27x_timer_dev_properties);
 }
 
 static const TypeInfo pxa27x_timer_dev_info = {

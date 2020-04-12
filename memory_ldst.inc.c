@@ -33,28 +33,20 @@ static inline uint32_t glue(address_space_ldl_internal, SUFFIX)(ARG1_DECL,
     bool release_lock = false;
 
     RCU_READ_LOCK();
-    mr = TRANSLATE(addr, &addr1, &l, false);
-    if (l < 4 || !IS_DIRECT(mr, false)) {
+    mr = TRANSLATE(addr, &addr1, &l, false, attrs);
+    if (l < 4 || !memory_access_is_direct(mr, false)) {
         release_lock |= prepare_mmio_access(mr);
 
         /* I/O case */
+        //TODO: panda: war davor &val, 4, ...; funktionierts noch immer?
         RR_DO_RECORD_OR_REPLAY(
-            /*action*/   r = memory_region_dispatch_read(mr, addr1, &val, 4, attrs),
+            /*action*/   r = memory_region_dispatch_read(mr, addr1, &val, MO_32 | devend_memop(endian), attrs),
             /*record*/   rr_input_4(&r); rr_input_8(&val),
             /*replay*/   rr_input_4(&r); rr_input_8(&val),
             /*location*/ RR_CALLSITE_READ_4);
-#if defined(TARGET_WORDS_BIGENDIAN)
-        if (endian == DEVICE_LITTLE_ENDIAN) {
-            val = bswap32(val);
-        }
-#else
-        if (endian == DEVICE_BIG_ENDIAN) {
-            val = bswap32(val);
-        }
-#endif
     } else {
         /* RAM case */
-        ptr = MAP_RAM(mr, addr1);
+        ptr = qemu_map_ram_ptr(mr->ram_block, addr1);
         switch (endian) {
         case DEVICE_LITTLE_ENDIAN:
             val = ldl_le_p(ptr);
@@ -99,24 +91,6 @@ uint32_t glue(address_space_ldl_be, SUFFIX)(ARG1_DECL,
                                                     DEVICE_BIG_ENDIAN);
 }
 
-uint32_t glue(ldl_phys, SUFFIX)(ARG1_DECL, hwaddr addr)
-{
-    return glue(address_space_ldl, SUFFIX)(ARG1, addr,
-                                           MEMTXATTRS_UNSPECIFIED, NULL);
-}
-
-uint32_t glue(ldl_le_phys, SUFFIX)(ARG1_DECL, hwaddr addr)
-{
-    return glue(address_space_ldl_le, SUFFIX)(ARG1, addr,
-                                              MEMTXATTRS_UNSPECIFIED, NULL);
-}
-
-uint32_t glue(ldl_be_phys, SUFFIX)(ARG1_DECL, hwaddr addr)
-{
-    return glue(address_space_ldl_be, SUFFIX)(ARG1, addr,
-                                              MEMTXATTRS_UNSPECIFIED, NULL);
-}
-
 /* warning: addr must be aligned */
 static inline uint64_t glue(address_space_ldq_internal, SUFFIX)(ARG1_DECL,
     hwaddr addr, MemTxAttrs attrs, MemTxResult *result,
@@ -131,28 +105,20 @@ static inline uint64_t glue(address_space_ldq_internal, SUFFIX)(ARG1_DECL,
     bool release_lock = false;
 
     RCU_READ_LOCK();
-    mr = TRANSLATE(addr, &addr1, &l, false);
-    if (l < 8 || !IS_DIRECT(mr, false)) {
+    mr = TRANSLATE(addr, &addr1, &l, false, attrs);
+    if (l < 8 || !memory_access_is_direct(mr, false)) {
         release_lock |= prepare_mmio_access(mr);
 
         /* I/O case */
+        //TODO: panda: same here, nur 8
         RR_DO_RECORD_OR_REPLAY(
-            /*action*/   r = memory_region_dispatch_read(mr, addr1, &val, 8, attrs),
+            /*action*/   r = memory_region_dispatch_read(mr, addr1, &val, MO_64 | devend_memop(endian), attrs),
             /*record*/   rr_input_4(&r); rr_input_8(&val),
             /*replay*/   rr_input_4(&r); rr_input_8(&val),
             /*location*/ RR_CALLSITE_READ_8);
-#if defined(TARGET_WORDS_BIGENDIAN)
-        if (endian == DEVICE_LITTLE_ENDIAN) {
-            val = bswap64(val);
-        }
-#else
-        if (endian == DEVICE_BIG_ENDIAN) {
-            val = bswap64(val);
-        }
-#endif
     } else {
         /* RAM case */
-        ptr = MAP_RAM(mr, addr1);
+        ptr = qemu_map_ram_ptr(mr->ram_block, addr1);
         switch (endian) {
         case DEVICE_LITTLE_ENDIAN:
             val = ldq_le_p(ptr);
@@ -197,24 +163,6 @@ uint64_t glue(address_space_ldq_be, SUFFIX)(ARG1_DECL,
                                                     DEVICE_BIG_ENDIAN);
 }
 
-uint64_t glue(ldq_phys, SUFFIX)(ARG1_DECL, hwaddr addr)
-{
-    return glue(address_space_ldq, SUFFIX)(ARG1, addr,
-                                           MEMTXATTRS_UNSPECIFIED, NULL);
-}
-
-uint64_t glue(ldq_le_phys, SUFFIX)(ARG1_DECL, hwaddr addr)
-{
-    return glue(address_space_ldq_le, SUFFIX)(ARG1, addr,
-                                              MEMTXATTRS_UNSPECIFIED, NULL);
-}
-
-uint64_t glue(ldq_be_phys, SUFFIX)(ARG1_DECL, hwaddr addr)
-{
-    return glue(address_space_ldq_be, SUFFIX)(ARG1, addr,
-                                              MEMTXATTRS_UNSPECIFIED, NULL);
-}
-
 uint32_t glue(address_space_ldub, SUFFIX)(ARG1_DECL,
     hwaddr addr, MemTxAttrs attrs, MemTxResult *result)
 {
@@ -227,19 +175,19 @@ uint32_t glue(address_space_ldub, SUFFIX)(ARG1_DECL,
     bool release_lock = false;
 
     RCU_READ_LOCK();
-    mr = TRANSLATE(addr, &addr1, &l, false);
-    if (!IS_DIRECT(mr, false)) {
+    mr = TRANSLATE(addr, &addr1, &l, false, attrs);
+    if (!memory_access_is_direct(mr, false)) {
         release_lock |= prepare_mmio_access(mr);
 
         /* I/O case */
         RR_DO_RECORD_OR_REPLAY(
-            /*action*/   r = memory_region_dispatch_read(mr, addr1, &val, 1, attrs),
+            /*action*/   r = memory_region_dispatch_read(mr, addr1, &val, MO_8, attrs),
             /*record*/   rr_input_4(&r); rr_input_8(&val),
             /*replay*/   rr_input_4(&r); rr_input_8(&val),
             /*location*/ RR_CALLSITE_READ_1);
     } else {
         /* RAM case */
-        ptr = MAP_RAM(mr, addr1);
+        ptr = qemu_map_ram_ptr(mr->ram_block, addr1);
         val = ldub_p(ptr);
         r = MEMTX_OK;
     }
@@ -251,12 +199,6 @@ uint32_t glue(address_space_ldub, SUFFIX)(ARG1_DECL,
     }
     RCU_READ_UNLOCK();
     return val;
-}
-
-uint32_t glue(ldub_phys, SUFFIX)(ARG1_DECL, hwaddr addr)
-{
-    return glue(address_space_ldub, SUFFIX)(ARG1, addr,
-                                            MEMTXATTRS_UNSPECIFIED, NULL);
 }
 
 /* warning: addr must be aligned */
@@ -273,28 +215,20 @@ static inline uint32_t glue(address_space_lduw_internal, SUFFIX)(ARG1_DECL,
     bool release_lock = false;
 
     RCU_READ_LOCK();
-    mr = TRANSLATE(addr, &addr1, &l, false);
-    if (l < 2 || !IS_DIRECT(mr, false)) {
+    mr = TRANSLATE(addr, &addr1, &l, false, attrs);
+    if (l < 2 || !memory_access_is_direct(mr, false)) {
         release_lock |= prepare_mmio_access(mr);
 
         /* I/O case */
+        //TODO: panda: and here
         RR_DO_RECORD_OR_REPLAY(
-            /*action*/   r = memory_region_dispatch_read(mr, addr1, &val, 2, attrs),
+            /*action*/   r = memory_region_dispatch_read(mr, addr1, &val, MO_16 | devend_memop(endian), attrs),
             /*record*/   rr_input_4(&r); rr_input_8(&val),
             /*replay*/   rr_input_4(&r); rr_input_8(&val),
             /*location*/ RR_CALLSITE_READ_2);
-#if defined(TARGET_WORDS_BIGENDIAN)
-        if (endian == DEVICE_LITTLE_ENDIAN) {
-            val = bswap16(val);
-        }
-#else
-        if (endian == DEVICE_BIG_ENDIAN) {
-            val = bswap16(val);
-        }
-#endif
     } else {
         /* RAM case */
-        ptr = MAP_RAM(mr, addr1);
+        ptr = qemu_map_ram_ptr(mr->ram_block, addr1);
         switch (endian) {
         case DEVICE_LITTLE_ENDIAN:
             val = lduw_le_p(ptr);
@@ -339,24 +273,6 @@ uint32_t glue(address_space_lduw_be, SUFFIX)(ARG1_DECL,
                                        DEVICE_BIG_ENDIAN);
 }
 
-uint32_t glue(lduw_phys, SUFFIX)(ARG1_DECL, hwaddr addr)
-{
-    return glue(address_space_lduw, SUFFIX)(ARG1, addr,
-                                            MEMTXATTRS_UNSPECIFIED, NULL);
-}
-
-uint32_t glue(lduw_le_phys, SUFFIX)(ARG1_DECL, hwaddr addr)
-{
-    return glue(address_space_lduw_le, SUFFIX)(ARG1, addr,
-                                               MEMTXATTRS_UNSPECIFIED, NULL);
-}
-
-uint32_t glue(lduw_be_phys, SUFFIX)(ARG1_DECL, hwaddr addr)
-{
-    return glue(address_space_lduw_be, SUFFIX)(ARG1, addr,
-                                               MEMTXATTRS_UNSPECIFIED, NULL);
-}
-
 /* warning: addr must be aligned. The ram page is not masked as dirty
    and the code inside is not invalidated. It is useful if the dirty
    bits are used to track modified PTEs */
@@ -372,18 +288,18 @@ void glue(address_space_stl_notdirty, SUFFIX)(ARG1_DECL,
     bool release_lock = false;
 
     RCU_READ_LOCK();
-    mr = TRANSLATE(addr, &addr1, &l, true);
-    if (l < 4 || !IS_DIRECT(mr, true)) {
+    mr = TRANSLATE(addr, &addr1, &l, true, attrs);
+    if (l < 4 || !memory_access_is_direct(mr, true)) {
         release_lock |= prepare_mmio_access(mr);
 
         RR_DO_RECORD_OR_REPLAY(
         /*action=*/
-        r = memory_region_dispatch_write(mr, addr1, val, 4, attrs),
+        r = memory_region_dispatch_write(mr, addr1, val, MO_32, attrs),
         /*record=*/RR_NO_ACTION,
         /*replay=*/r = MEMTX_OK,
         /*location=*/RR_CALLSITE_WRITE_4);
     } else {
-        ptr = MAP_RAM(mr, addr1);
+        ptr = qemu_map_ram_ptr(mr->ram_block, addr1);
         stl_p(ptr, val);
 
         dirty_log_mask = memory_region_get_dirty_log_mask(mr);
@@ -401,12 +317,6 @@ void glue(address_space_stl_notdirty, SUFFIX)(ARG1_DECL,
     RCU_READ_UNLOCK();
 }
 
-void glue(stl_phys_notdirty, SUFFIX)(ARG1_DECL, hwaddr addr, uint32_t val)
-{
-    glue(address_space_stl_notdirty, SUFFIX)(ARG1, addr, val,
-                                             MEMTXATTRS_UNSPECIFIED, NULL);
-}
-
 /* warning: addr must be aligned */
 static inline void glue(address_space_stl_internal, SUFFIX)(ARG1_DECL,
     hwaddr addr, uint32_t val, MemTxAttrs attrs,
@@ -420,19 +330,11 @@ static inline void glue(address_space_stl_internal, SUFFIX)(ARG1_DECL,
     bool release_lock = false;
 
     RCU_READ_LOCK();
-    mr = TRANSLATE(addr, &addr1, &l, true);
-    if (l < 4 || !IS_DIRECT(mr, true)) {
+    mr = TRANSLATE(addr, &addr1, &l, true, attrs);
+    if (l < 4 || !memory_access_is_direct(mr, true)) {
         release_lock |= prepare_mmio_access(mr);
-
-#if defined(TARGET_WORDS_BIGENDIAN)
-        if (endian == DEVICE_LITTLE_ENDIAN) {
-            val = bswap32(val);
-        }
-#else
-        if (endian == DEVICE_BIG_ENDIAN) {
-            val = bswap32(val);
-        }
-#endif
+        r = memory_region_dispatch_write(mr, addr1, val,
+                                         MO_32 | devend_memop(endian), attrs);
         /* Because is_direct is false, these are accesses to an area other
          * than RAM. That means we want to throw it away on replay. All paths
          * to this function from guest code don't request a result, so we don't
@@ -441,13 +343,13 @@ static inline void glue(address_space_stl_internal, SUFFIX)(ARG1_DECL,
          */
         RR_DO_RECORD_OR_REPLAY(
         /*action=*/
-        r = memory_region_dispatch_write(mr, addr1, val, 4, attrs),
+        r = memory_region_dispatch_write(mr, addr1, val, MO_32 | devend_memop(endian), attrs),
         /*record=*/RR_NO_ACTION,
         /*replay=*/r = MEMTX_OK,
         /*location=*/RR_CALLSITE_WRITE_4);
     } else {
         /* RAM case */
-        ptr = MAP_RAM(mr, addr1);
+        ptr = qemu_map_ram_ptr(mr->ram_block, addr1);
         switch (endian) {
         case DEVICE_LITTLE_ENDIAN:
             stl_le_p(ptr, val);
@@ -462,7 +364,7 @@ static inline void glue(address_space_stl_internal, SUFFIX)(ARG1_DECL,
         if (rr_in_record() && (rr_record_in_progress || rr_record_in_main_loop_wait)) {
             rr_device_mem_rw_call_record(addr1, ptr, l, /*is_write*/1);
         }
-        INVALIDATE(mr, addr1, 4);
+        invalidate_and_set_dirty(mr, addr1, 4);
         r = MEMTX_OK;
     }
     if (result) {
@@ -495,24 +397,6 @@ void glue(address_space_stl_be, SUFFIX)(ARG1_DECL,
                                              result, DEVICE_BIG_ENDIAN);
 }
 
-void glue(stl_phys, SUFFIX)(ARG1_DECL, hwaddr addr, uint32_t val)
-{
-    glue(address_space_stl, SUFFIX)(ARG1, addr, val,
-                                    MEMTXATTRS_UNSPECIFIED, NULL);
-}
-
-void glue(stl_le_phys, SUFFIX)(ARG1_DECL, hwaddr addr, uint32_t val)
-{
-    glue(address_space_stl_le, SUFFIX)(ARG1, addr, val,
-                                       MEMTXATTRS_UNSPECIFIED, NULL);
-}
-
-void glue(stl_be_phys, SUFFIX)(ARG1_DECL, hwaddr addr, uint32_t val)
-{
-    glue(address_space_stl_be, SUFFIX)(ARG1, addr, val,
-                                       MEMTXATTRS_UNSPECIFIED, NULL);
-}
-
 void glue(address_space_stb, SUFFIX)(ARG1_DECL,
     hwaddr addr, uint32_t val, MemTxAttrs attrs, MemTxResult *result)
 {
@@ -524,20 +408,20 @@ void glue(address_space_stb, SUFFIX)(ARG1_DECL,
     bool release_lock = false;
 
     RCU_READ_LOCK();
-    mr = TRANSLATE(addr, &addr1, &l, true);
-    if (!IS_DIRECT(mr, true)) {
+    mr = TRANSLATE(addr, &addr1, &l, true, attrs);
+    if (!memory_access_is_direct(mr, true)) {
         release_lock |= prepare_mmio_access(mr);
         RR_DO_RECORD_OR_REPLAY(
         /*action=*/
-        r = memory_region_dispatch_write(mr, addr1, val, 1, attrs),
+        r = memory_region_dispatch_write(mr, addr1, val, MO_8, attrs),
         /*record=*/RR_NO_ACTION,
         /*replay=*/r = MEMTX_OK,
         /*location=*/RR_CALLSITE_WRITE_1);
     } else {
         /* RAM case */
-        ptr = MAP_RAM(mr, addr1);
+        ptr = qemu_map_ram_ptr(mr->ram_block, addr1);
         stb_p(ptr, val);
-        INVALIDATE(mr, addr1, 1);
+        invalidate_and_set_dirty(mr, addr1, 1);
         r = MEMTX_OK;
     }
     if (result) {
@@ -547,12 +431,6 @@ void glue(address_space_stb, SUFFIX)(ARG1_DECL,
         qemu_mutex_unlock_iothread();
     }
     RCU_READ_UNLOCK();
-}
-
-void glue(stb_phys, SUFFIX)(ARG1_DECL, hwaddr addr, uint32_t val)
-{
-    glue(address_space_stb, SUFFIX)(ARG1, addr, val,
-                                    MEMTXATTRS_UNSPECIFIED, NULL);
 }
 
 /* warning: addr must be aligned */
@@ -568,29 +446,21 @@ static inline void glue(address_space_stw_internal, SUFFIX)(ARG1_DECL,
     bool release_lock = false;
 
     RCU_READ_LOCK();
-    mr = TRANSLATE(addr, &addr1, &l, true);
-    if (l < 2 || !IS_DIRECT(mr, true)) {
+    mr = TRANSLATE(addr, &addr1, &l, true, attrs);
+    if (l < 2 || !memory_access_is_direct(mr, true)) {
         release_lock |= prepare_mmio_access(mr);
-
-#if defined(TARGET_WORDS_BIGENDIAN)
-        if (endian == DEVICE_LITTLE_ENDIAN) {
-            val = bswap16(val);
-        }
-#else
-        if (endian == DEVICE_BIG_ENDIAN) {
-            val = bswap16(val);
-        }
-#endif
+        r = memory_region_dispatch_write(mr, addr1, val,
+                                         MO_16 | devend_memop(endian), attrs);
         /* See comment in address_space_stl_internal. */
         RR_DO_RECORD_OR_REPLAY(
         /*action=*/
-        r = memory_region_dispatch_write(mr, addr1, val, 2, attrs),
+        r = memory_region_dispatch_write(mr, addr1, val, MO_16 | devend_memop(endian), attrs),
         /*record=*/RR_NO_ACTION,
         /*replay=*/r = MEMTX_OK,
         /*location=*/RR_CALLSITE_WRITE_2);
     } else {
         /* RAM case */
-        ptr = MAP_RAM(mr, addr1);
+        ptr = qemu_map_ram_ptr(mr->ram_block, addr1);
         switch (endian) {
         case DEVICE_LITTLE_ENDIAN:
             stw_le_p(ptr, val);
@@ -602,7 +472,7 @@ static inline void glue(address_space_stw_internal, SUFFIX)(ARG1_DECL,
             stw_p(ptr, val);
             break;
         }
-        INVALIDATE(mr, addr1, 2);
+        invalidate_and_set_dirty(mr, addr1, 2);
         r = MEMTX_OK;
     }
     if (result) {
@@ -635,24 +505,6 @@ void glue(address_space_stw_be, SUFFIX)(ARG1_DECL,
                                DEVICE_BIG_ENDIAN);
 }
 
-void glue(stw_phys, SUFFIX)(ARG1_DECL, hwaddr addr, uint32_t val)
-{
-    glue(address_space_stw, SUFFIX)(ARG1, addr, val,
-                                    MEMTXATTRS_UNSPECIFIED, NULL);
-}
-
-void glue(stw_le_phys, SUFFIX)(ARG1_DECL, hwaddr addr, uint32_t val)
-{
-    glue(address_space_stw_le, SUFFIX)(ARG1, addr, val,
-                                       MEMTXATTRS_UNSPECIFIED, NULL);
-}
-
-void glue(stw_be_phys, SUFFIX)(ARG1_DECL, hwaddr addr, uint32_t val)
-{
-    glue(address_space_stw_be, SUFFIX)(ARG1, addr, val,
-                                       MEMTXATTRS_UNSPECIFIED, NULL);
-}
-
 static void glue(address_space_stq_internal, SUFFIX)(ARG1_DECL,
     hwaddr addr, uint64_t val, MemTxAttrs attrs,
     MemTxResult *result, enum device_endian endian)
@@ -665,29 +517,21 @@ static void glue(address_space_stq_internal, SUFFIX)(ARG1_DECL,
     bool release_lock = false;
 
     RCU_READ_LOCK();
-    mr = TRANSLATE(addr, &addr1, &l, true);
-    if (l < 8 || !IS_DIRECT(mr, true)) {
+    mr = TRANSLATE(addr, &addr1, &l, true, attrs);
+    if (l < 8 || !memory_access_is_direct(mr, true)) {
         release_lock |= prepare_mmio_access(mr);
-
-#if defined(TARGET_WORDS_BIGENDIAN)
-        if (endian == DEVICE_LITTLE_ENDIAN) {
-            val = bswap64(val);
-        }
-#else
-        if (endian == DEVICE_BIG_ENDIAN) {
-            val = bswap64(val);
-        }
-#endif
+        r = memory_region_dispatch_write(mr, addr1, val,
+                                         MO_64 | devend_memop(endian), attrs);
         /* See comment in address_space_stl_internal. */
         RR_DO_RECORD_OR_REPLAY(
         /*action=*/
-        r = memory_region_dispatch_write(mr, addr1, val, 8, attrs),
+        r = memory_region_dispatch_write(mr, addr1, val, MO_64 | devend_memop(endian), attrs),
         /*record=*/RR_NO_ACTION,
         /*replay=*/r = MEMTX_OK,
         /*location=*/RR_CALLSITE_WRITE_8);
     } else {
         /* RAM case */
-        ptr = MAP_RAM(mr, addr1);
+        ptr = qemu_map_ram_ptr(mr->ram_block, addr1);
         switch (endian) {
         case DEVICE_LITTLE_ENDIAN:
             stq_le_p(ptr, val);
@@ -699,7 +543,7 @@ static void glue(address_space_stq_internal, SUFFIX)(ARG1_DECL,
             stq_p(ptr, val);
             break;
         }
-        INVALIDATE(mr, addr1, 8);
+        invalidate_and_set_dirty(mr, addr1, 8);
         r = MEMTX_OK;
     }
     if (result) {
@@ -732,30 +576,9 @@ void glue(address_space_stq_be, SUFFIX)(ARG1_DECL,
                                              DEVICE_BIG_ENDIAN);
 }
 
-void glue(stq_phys, SUFFIX)(ARG1_DECL, hwaddr addr, uint64_t val)
-{
-    glue(address_space_stq, SUFFIX)(ARG1, addr, val,
-                                    MEMTXATTRS_UNSPECIFIED, NULL);
-}
-
-void glue(stq_le_phys, SUFFIX)(ARG1_DECL, hwaddr addr, uint64_t val)
-{
-    glue(address_space_stq_le, SUFFIX)(ARG1, addr, val,
-                                       MEMTXATTRS_UNSPECIFIED, NULL);
-}
-
-void glue(stq_be_phys, SUFFIX)(ARG1_DECL, hwaddr addr, uint64_t val)
-{
-    glue(address_space_stq_be, SUFFIX)(ARG1, addr, val,
-                                       MEMTXATTRS_UNSPECIFIED, NULL);
-}
-
 #undef ARG1_DECL
 #undef ARG1
 #undef SUFFIX
 #undef TRANSLATE
-#undef IS_DIRECT
-#undef MAP_RAM
-#undef INVALIDATE
 #undef RCU_READ_LOCK
 #undef RCU_READ_UNLOCK

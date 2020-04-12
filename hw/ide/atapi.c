@@ -27,6 +27,7 @@
 #include "hw/ide/internal.h"
 #include "hw/scsi/scsi.h"
 #include "sysemu/block-backend.h"
+#include "trace.h"
 
 #define ATAPI_SECTOR_BITS (2 + BDRV_SECTOR_BITS)
 #define ATAPI_SECTOR_SIZE (1 << ATAPI_SECTOR_BITS)
@@ -42,30 +43,6 @@ static void padstr8(uint8_t *buf, int buf_size, const char *src)
         else
             buf[i] = ' ';
     }
-}
-
-static inline void cpu_to_ube16(uint8_t *buf, int val)
-{
-    buf[0] = val >> 8;
-    buf[1] = val & 0xff;
-}
-
-static inline void cpu_to_ube32(uint8_t *buf, unsigned int val)
-{
-    buf[0] = val >> 24;
-    buf[1] = val >> 16;
-    buf[2] = val >> 8;
-    buf[3] = val & 0xff;
-}
-
-static inline int ube16_to_cpu(const uint8_t *buf)
-{
-    return (buf[0] << 8) | buf[1];
-}
-
-static inline int ube32_to_cpu(const uint8_t *buf)
-{
-    return (buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | buf[3];
 }
 
 static void lba_to_msf(uint8_t *buf, int lba)
@@ -116,9 +93,7 @@ cd_read_sector_sync(IDEState *s)
     block_acct_start(blk_get_stats(s->blk), &s->acct,
                      ATAPI_SECTOR_SIZE, BLOCK_ACCT_READ);
 
-#ifdef DEBUG_IDE_ATAPI
-    printf("cd_read_sector_sync: lba=%d\n", s->lba);
-#endif
+    trace_cd_read_sector_sync(s->lba);
 
     switch (s->cd_sector_size) {
     case 2048:
@@ -152,9 +127,7 @@ static void cd_read_sector_cb(void *opaque, int ret)
 {
     IDEState *s = opaque;
 
-#ifdef DEBUG_IDE_ATAPI
-    printf("cd_read_sector_cb: lba=%d ret=%d\n", s->lba, ret);
-#endif
+    trace_cd_read_sector_cb(s->lba, ret);
 
     if (ret < 0) {
         block_acct_failed(blk_get_stats(s->blk), &s->acct);
@@ -177,20 +150,17 @@ static void cd_read_sector_cb(void *opaque, int ret)
 
 static int cd_read_sector(IDEState *s)
 {
+    void *buf;
+
     if (s->cd_sector_size != 2048 && s->cd_sector_size != 2352) {
         block_acct_invalid(blk_get_stats(s->blk), BLOCK_ACCT_READ);
         return -EINVAL;
     }
 
-    s->iov.iov_base = (s->cd_sector_size == 2352) ?
-                      s->io_buffer + 16 : s->io_buffer;
+    buf = (s->cd_sector_size == 2352) ? s->io_buffer + 16 : s->io_buffer;
+    qemu_iovec_init_buf(&s->qiov, buf, ATAPI_SECTOR_SIZE);
 
-    s->iov.iov_len = ATAPI_SECTOR_SIZE;
-    qemu_iovec_init_external(&s->qiov, &s->iov, 1);
-
-#ifdef DEBUG_IDE_ATAPI
-    printf("cd_read_sector: lba=%d\n", s->lba);
-#endif
+    trace_cd_read_sector(s->lba);
 
     block_acct_start(blk_get_stats(s->blk), &s->acct,
                      ATAPI_SECTOR_SIZE, BLOCK_ACCT_READ);
@@ -213,9 +183,7 @@ void ide_atapi_cmd_ok(IDEState *s)
 
 void ide_atapi_cmd_error(IDEState *s, int sense_key, int asc)
 {
-#ifdef DEBUG_IDE_ATAPI
-    printf("atapi_cmd_error: sense=0x%x asc=0x%x\n", sense_key, asc);
-#endif
+    trace_ide_atapi_cmd_error(s, sense_key, asc);
     s->error = sense_key << 4;
     s->status = READY_STAT | ERR_STAT;
     s->nsector = (s->nsector & ~7) | ATAPI_INT_REASON_IO | ATAPI_INT_REASON_CD;
@@ -252,20 +220,11 @@ static uint16_t atapi_byte_count_limit(IDEState *s)
 void ide_atapi_cmd_reply_end(IDEState *s)
 {
     int byte_count_limit, size, ret;
-#ifdef DEBUG_IDE_ATAPI
-    printf("reply: tx_size=%d elem_tx_size=%d index=%d\n",
-           s->packet_transfer_size,
-           s->elementary_transfer_size,
-           s->io_buffer_index);
-#endif
-    if (s->packet_transfer_size <= 0) {
-        /* end of transfer */
-        ide_atapi_cmd_ok(s);
-        ide_set_irq(s->bus);
-#ifdef DEBUG_IDE_ATAPI
-        printf("end of transfer, status=0x%x\n", s->status);
-#endif
-    } else {
+    while (s->packet_transfer_size > 0) {
+        trace_ide_atapi_cmd_reply_end(s, s->packet_transfer_size,
+                                      s->elementary_transfer_size,
+                                      s->io_buffer_index);
+
         /* see if a new sector must be read */
         if (s->lba != -1 && s->io_buffer_index >= s->cd_sector_size) {
             if (!s->elementary_transfer_size) {
@@ -291,18 +250,12 @@ void ide_atapi_cmd_reply_end(IDEState *s)
             size = s->cd_sector_size - s->io_buffer_index;
             if (size > s->elementary_transfer_size)
                 size = s->elementary_transfer_size;
-            s->packet_transfer_size -= size;
-            s->elementary_transfer_size -= size;
-            s->io_buffer_index += size;
-            ide_transfer_start(s, s->io_buffer + s->io_buffer_index - size,
-                               size, ide_atapi_cmd_reply_end);
         } else {
             /* a new transfer is needed */
             s->nsector = (s->nsector & ~7) | ATAPI_INT_REASON_IO;
+            ide_set_irq(s->bus);
             byte_count_limit = atapi_byte_count_limit(s);
-#ifdef DEBUG_IDE_ATAPI
-            printf("byte_count_limit=%d\n", byte_count_limit);
-#endif
+            trace_ide_atapi_cmd_reply_end_bcl(s, byte_count_limit);
             size = s->packet_transfer_size;
             if (size > byte_count_limit) {
                 /* byte count limit must be even if this case */
@@ -318,17 +271,27 @@ void ide_atapi_cmd_reply_end(IDEState *s)
                 if (size > (s->cd_sector_size - s->io_buffer_index))
                     size = (s->cd_sector_size - s->io_buffer_index);
             }
-            s->packet_transfer_size -= size;
-            s->elementary_transfer_size -= size;
-            s->io_buffer_index += size;
-            ide_transfer_start(s, s->io_buffer + s->io_buffer_index - size,
-                               size, ide_atapi_cmd_reply_end);
-            ide_set_irq(s->bus);
-#ifdef DEBUG_IDE_ATAPI
-            printf("status=0x%x\n", s->status);
-#endif
+            trace_ide_atapi_cmd_reply_end_new(s, s->status);
+        }
+        s->packet_transfer_size -= size;
+        s->elementary_transfer_size -= size;
+        s->io_buffer_index += size;
+
+        /* Some adapters process PIO data right away.  In that case, we need
+         * to avoid mutual recursion between ide_transfer_start
+         * and ide_atapi_cmd_reply_end.
+         */
+        if (!ide_transfer_start_norecurse(s,
+                                          s->io_buffer + s->io_buffer_index - size,
+                                          size, ide_atapi_cmd_reply_end)) {
+            return;
         }
     }
+
+    /* end of transfer */
+    trace_ide_atapi_cmd_reply_end_eot(s, s->status);
+    ide_atapi_cmd_ok(s);
+    ide_set_irq(s->bus);
 }
 
 /* send a reply of 'size' bytes in s->io_buffer to an ATAPI command */
@@ -368,9 +331,7 @@ static void ide_atapi_cmd_read_pio(IDEState *s, int lba, int nb_sectors,
 
 static void ide_atapi_cmd_check_status(IDEState *s)
 {
-#ifdef DEBUG_IDE_ATAPI
-    printf("atapi_cmd_check_status\n");
-#endif
+    trace_ide_atapi_cmd_check_status(s);
     s->error = MC_ERR | (UNIT_ATTENTION << 4);
     s->status = ERR_STAT;
     s->nsector = 0;
@@ -434,13 +395,9 @@ static void ide_atapi_cmd_read_dma_cb(void *opaque, int ret)
         s->io_buffer_size = n * 2048;
         data_offset = 0;
     }
-#ifdef DEBUG_AIO
-    printf("aio_read_cd: lba=%u n=%d\n", s->lba, n);
-#endif
-
-    s->bus->dma->iov.iov_base = (void *)(s->io_buffer + data_offset);
-    s->bus->dma->iov.iov_len = n * ATAPI_SECTOR_SIZE;
-    qemu_iovec_init_external(&s->bus->dma->qiov, &s->bus->dma->iov, 1);
+    trace_ide_atapi_cmd_read_dma_cb_aio(s, s->lba, n);
+    qemu_iovec_init_buf(&s->bus->dma->qiov, s->io_buffer + data_offset,
+                        n * ATAPI_SECTOR_SIZE);
 
     s->bus->dma->aiocb = ide_buffered_readv(s, (int64_t)s->lba << 2,
                                             &s->bus->dma->qiov, n * 4,
@@ -477,10 +434,8 @@ static void ide_atapi_cmd_read_dma(IDEState *s, int lba, int nb_sectors,
 static void ide_atapi_cmd_read(IDEState *s, int lba, int nb_sectors,
                                int sector_size)
 {
-#ifdef DEBUG_IDE_ATAPI
-    printf("read %s: LBA=%d nb_sectors=%d\n", s->atapi_dma ? "dma" : "pio",
-        lba, nb_sectors);
-#endif
+    trace_ide_atapi_cmd_read(s, s->atapi_dma ? "dma" : "pio",
+                             lba, nb_sectors);
     if (s->atapi_dma) {
         ide_atapi_cmd_read_dma(s, lba, nb_sectors, sector_size);
     } else {
@@ -506,7 +461,7 @@ static inline uint8_t ide_atapi_set_profile(uint8_t *buf, uint8_t *index,
     uint8_t *buf_profile = buf + 12; /* start of profiles */
 
     buf_profile += ((*index) * 4); /* start of indexed profile */
-    cpu_to_ube16 (buf_profile, profile);
+    stw_be_p(buf_profile, profile);
     buf_profile[2] = ((buf_profile[0] == buf[6]) && (buf_profile[1] == buf[7]));
 
     /* each profile adds 4 bytes to the response */
@@ -539,9 +494,9 @@ static int ide_dvd_read_structure(IDEState *s, int format,
                 buf[7] = 0;   /* default densities */
 
                 /* FIXME: 0x30000 per spec? */
-                cpu_to_ube32(buf + 8, 0); /* start sector */
-                cpu_to_ube32(buf + 12, total_sectors - 1); /* end sector */
-                cpu_to_ube32(buf + 16, total_sectors - 1); /* l0 end sector */
+                stl_be_p(buf + 8, 0); /* start sector */
+                stl_be_p(buf + 12, total_sectors - 1); /* end sector */
+                stl_be_p(buf + 16, total_sectors - 1); /* l0 end sector */
 
                 /* Size of buffer, not including 2 byte size field */
                 stw_be_p(buf, 2048 + 2);
@@ -860,7 +815,7 @@ static void cmd_get_configuration(IDEState *s, uint8_t *buf)
     }
 
     /* XXX: could result in alignment problems in some architectures */
-    max_len = ube16_to_cpu(buf + 7);
+    max_len = lduw_be_p(buf + 7);
 
     /*
      * XXX: avoid overflow for io_buffer if max_len is bigger than
@@ -880,16 +835,16 @@ static void cmd_get_configuration(IDEState *s, uint8_t *buf)
      * to use as current.  0 means there is no media
      */
     if (media_is_dvd(s)) {
-        cpu_to_ube16(buf + 6, MMC_PROFILE_DVD_ROM);
+        stw_be_p(buf + 6, MMC_PROFILE_DVD_ROM);
     } else if (media_is_cd(s)) {
-        cpu_to_ube16(buf + 6, MMC_PROFILE_CD_ROM);
+        stw_be_p(buf + 6, MMC_PROFILE_CD_ROM);
     }
 
     buf[10] = 0x02 | 0x01; /* persistent and current */
     len = 12; /* headers: 8 + 4 */
     len += ide_atapi_set_profile(buf, &index, MMC_PROFILE_DVD_ROM);
     len += ide_atapi_set_profile(buf, &index, MMC_PROFILE_CD_ROM);
-    cpu_to_ube32(buf, len - 4); /* data length */
+    stl_be_p(buf, len - 4); /* data length */
 
     ide_atapi_cmd_reply(s, len, max_len);
 }
@@ -899,7 +854,7 @@ static void cmd_mode_sense(IDEState *s, uint8_t *buf)
     int action, code;
     int max_len;
 
-    max_len = ube16_to_cpu(buf + 7);
+    max_len = lduw_be_p(buf + 7);
     action = buf[2] >> 6;
     code = buf[2] & 0x3f;
 
@@ -907,7 +862,7 @@ static void cmd_mode_sense(IDEState *s, uint8_t *buf)
     case 0: /* current values */
         switch(code) {
         case MODE_PAGE_R_W_ERROR: /* error recovery */
-            cpu_to_ube16(&buf[0], 16 - 2);
+            stw_be_p(&buf[0], 16 - 2);
             buf[2] = 0x70;
             buf[3] = 0;
             buf[4] = 0;
@@ -926,7 +881,7 @@ static void cmd_mode_sense(IDEState *s, uint8_t *buf)
             ide_atapi_cmd_reply(s, 16, max_len);
             break;
         case MODE_PAGE_AUDIO_CTL:
-            cpu_to_ube16(&buf[0], 24 - 2);
+            stw_be_p(&buf[0], 24 - 2);
             buf[2] = 0x70;
             buf[3] = 0;
             buf[4] = 0;
@@ -945,7 +900,7 @@ static void cmd_mode_sense(IDEState *s, uint8_t *buf)
             ide_atapi_cmd_reply(s, 24, max_len);
             break;
         case MODE_PAGE_CAPABILITIES:
-            cpu_to_ube16(&buf[0], 30 - 2);
+            stw_be_p(&buf[0], 30 - 2);
             buf[2] = 0x70;
             buf[3] = 0;
             buf[4] = 0;
@@ -967,11 +922,11 @@ static void cmd_mode_sense(IDEState *s, uint8_t *buf)
                 buf[14] |= 1 << 1;
             }
             buf[15] = 0x00; /* No volume & mute control, no changer */
-            cpu_to_ube16(&buf[16], 704); /* 4x read speed */
+            stw_be_p(&buf[16], 704); /* 4x read speed */
             buf[18] = 0; /* Two volume levels */
             buf[19] = 2;
-            cpu_to_ube16(&buf[20], 512); /* 512k buffer */
-            cpu_to_ube16(&buf[22], 704); /* 4x read speed current */
+            stw_be_p(&buf[20], 512); /* 512k buffer */
+            stw_be_p(&buf[22], 704); /* 4x read speed current */
             buf[24] = 0;
             buf[25] = 0;
             buf[26] = 0;
@@ -1019,12 +974,12 @@ static void cmd_read(IDEState *s, uint8_t* buf)
     int nb_sectors, lba;
 
     if (buf[0] == GPCMD_READ_10) {
-        nb_sectors = ube16_to_cpu(buf + 7);
+        nb_sectors = lduw_be_p(buf + 7);
     } else {
-        nb_sectors = ube32_to_cpu(buf + 6);
+        nb_sectors = ldl_be_p(buf + 6);
     }
 
-    lba = ube32_to_cpu(buf + 2);
+    lba = ldl_be_p(buf + 2);
     if (nb_sectors == 0) {
         ide_atapi_cmd_ok(s);
         return;
@@ -1038,7 +993,7 @@ static void cmd_read_cd(IDEState *s, uint8_t* buf)
     int nb_sectors, lba, transfer_request;
 
     nb_sectors = (buf[6] << 16) | (buf[7] << 8) | buf[8];
-    lba = ube32_to_cpu(buf + 2);
+    lba = ldl_be_p(buf + 2);
 
     if (nb_sectors == 0) {
         ide_atapi_cmd_ok(s);
@@ -1078,7 +1033,7 @@ static void cmd_seek(IDEState *s, uint8_t* buf)
     unsigned int lba;
     uint64_t total_sectors = s->nb_sectors >> 2;
 
-    lba = ube32_to_cpu(buf + 2);
+    lba = ldl_be_p(buf + 2);
     if (lba >= total_sectors) {
         ide_atapi_cmd_error(s, ILLEGAL_REQUEST, ASC_LOGICAL_BLOCK_OOR);
         return;
@@ -1119,15 +1074,15 @@ static void cmd_start_stop_unit(IDEState *s, uint8_t* buf)
 
 static void cmd_mechanism_status(IDEState *s, uint8_t* buf)
 {
-    int max_len = ube16_to_cpu(buf + 8);
+    int max_len = lduw_be_p(buf + 8);
 
-    cpu_to_ube16(buf, 0);
+    stw_be_p(buf, 0);
     /* no current LBA */
     buf[2] = 0;
     buf[3] = 0;
     buf[4] = 0;
     buf[5] = 1;
-    cpu_to_ube16(buf + 6, 0);
+    stw_be_p(buf + 6, 0);
     ide_atapi_cmd_reply(s, 8, max_len);
 }
 
@@ -1137,7 +1092,7 @@ static void cmd_read_toc_pma_atip(IDEState *s, uint8_t* buf)
     int max_len;
     uint64_t total_sectors = s->nb_sectors >> 2;
 
-    max_len = ube16_to_cpu(buf + 7);
+    max_len = lduw_be_p(buf + 7);
     format = buf[9] >> 6;
     msf = (buf[1] >> 1) & 1;
     start_track = buf[6];
@@ -1175,15 +1130,15 @@ static void cmd_read_cdvd_capacity(IDEState *s, uint8_t* buf)
     uint64_t total_sectors = s->nb_sectors >> 2;
 
     /* NOTE: it is really the number of sectors minus 1 */
-    cpu_to_ube32(buf, total_sectors - 1);
-    cpu_to_ube32(buf + 4, 2048);
+    stl_be_p(buf, total_sectors - 1);
+    stl_be_p(buf + 4, 2048);
     ide_atapi_cmd_reply(s, 8, 8);
 }
 
 static void cmd_read_disc_information(IDEState *s, uint8_t* buf)
 {
     uint8_t type = buf[1] & 7;
-    uint32_t max_len = ube16_to_cpu(buf + 7);
+    uint32_t max_len = lduw_be_p(buf + 7);
 
     /* Types 1/2 are only defined for Blu-Ray.  */
     if (type != 0) {
@@ -1217,7 +1172,7 @@ static void cmd_read_dvd_structure(IDEState *s, uint8_t* buf)
     int format = buf[7];
     int ret;
 
-    max_len = ube16_to_cpu(buf + 8);
+    max_len = lduw_be_p(buf + 8);
 
     if (format < 0xff) {
         if (media_is_cd(s)) {
@@ -1330,16 +1285,18 @@ void ide_atapi_cmd(IDEState *s)
     uint8_t *buf = s->io_buffer;
     const struct AtapiCmd *cmd = &atapi_cmd_table[s->io_buffer[0]];
 
-#ifdef DEBUG_IDE_ATAPI
-    {
+    trace_ide_atapi_cmd(s, s->io_buffer[0]);
+
+    if (trace_event_get_state_backends(TRACE_IDE_ATAPI_CMD_PACKET)) {
+        /* Each pretty-printed byte needs two bytes and a space; */
+        char *ppacket = g_malloc(ATAPI_PACKET_SIZE * 3 + 1);
         int i;
-        printf("ATAPI limit=0x%x packet:", s->lcyl | (s->hcyl << 8));
-        for(i = 0; i < ATAPI_PACKET_SIZE; i++) {
-            printf(" %02x", buf[i]);
+        for (i = 0; i < ATAPI_PACKET_SIZE; i++) {
+            sprintf(ppacket + (i * 3), "%02x ", buf[i]);
         }
-        printf("\n");
+        trace_ide_atapi_cmd_packet(s, s->lcyl | (s->hcyl << 8), ppacket);
+        g_free(ppacket);
     }
-#endif
 
     /*
      * If there's a UNIT_ATTENTION condition pending, only command flagged with

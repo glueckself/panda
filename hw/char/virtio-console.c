@@ -11,11 +11,14 @@
  */
 
 #include "qemu/osdep.h"
-#include "sysemu/char.h"
+#include "chardev/char-fe.h"
 #include "qemu/error-report.h"
+#include "qemu/module.h"
 #include "trace.h"
+#include "hw/qdev-properties.h"
 #include "hw/virtio/virtio-serial.h"
-#include "qapi-event.h"
+#include "qapi/error.h"
+#include "qapi/qapi-events-char.h"
 
 #define TYPE_VIRTIO_CONSOLE_SERIAL_PORT "virtserialport"
 #define VIRTIO_CONSOLE(obj) \
@@ -49,7 +52,7 @@ static ssize_t flush_buf(VirtIOSerialPort *port,
     VirtConsole *vcon = VIRTIO_CONSOLE(port);
     ssize_t ret;
 
-    if (!qemu_chr_fe_get_driver(&vcon->chr)) {
+    if (!qemu_chr_fe_backend_connected(&vcon->chr)) {
         /* If there's no backend, we can just say we consumed all data. */
         return len;
     }
@@ -113,8 +116,7 @@ static void set_guest_connected(VirtIOSerialPort *port, int guest_connected)
     }
 
     if (dev->id) {
-        qapi_event_send_vserport_change(dev->id, guest_connected,
-                                        &error_abort);
+        qapi_event_send_vserport_change(dev->id, guest_connected);
     }
 }
 
@@ -143,7 +145,7 @@ static void chr_read(void *opaque, const uint8_t *buf, int size)
     virtio_serial_write(port, buf, size);
 }
 
-static void chr_event(void *opaque, int event)
+static void chr_event(void *opaque, QEMUChrEvent event)
 {
     VirtConsole *vcon = opaque;
     VirtIOSerialPort *port = VIRTIO_SERIAL_PORT(vcon);
@@ -160,6 +162,55 @@ static void chr_event(void *opaque, int event)
         }
         virtio_serial_close(port);
         break;
+    case CHR_EVENT_BREAK:
+    case CHR_EVENT_MUX_IN:
+    case CHR_EVENT_MUX_OUT:
+        /* Ignore */
+        break;
+    }
+}
+
+static int chr_be_change(void *opaque)
+{
+    VirtConsole *vcon = opaque;
+    VirtIOSerialPort *port = VIRTIO_SERIAL_PORT(vcon);
+    VirtIOSerialPortClass *k = VIRTIO_SERIAL_PORT_GET_CLASS(port);
+
+    if (k->is_console) {
+        qemu_chr_fe_set_handlers(&vcon->chr, chr_can_read, chr_read,
+                                 NULL, chr_be_change, vcon, NULL, true);
+    } else {
+        qemu_chr_fe_set_handlers(&vcon->chr, chr_can_read, chr_read,
+                                 chr_event, chr_be_change, vcon, NULL, false);
+    }
+
+    if (vcon->watch) {
+        g_source_remove(vcon->watch);
+        vcon->watch = qemu_chr_fe_add_watch(&vcon->chr,
+                                            G_IO_OUT | G_IO_HUP,
+                                            chr_write_unblocked, vcon);
+    }
+
+    return 0;
+}
+
+static void virtconsole_enable_backend(VirtIOSerialPort *port, bool enable)
+{
+    VirtConsole *vcon = VIRTIO_CONSOLE(port);
+
+    if (!qemu_chr_fe_backend_connected(&vcon->chr)) {
+        return;
+    }
+
+    if (enable) {
+        VirtIOSerialPortClass *k = VIRTIO_SERIAL_PORT_GET_CLASS(port);
+
+        qemu_chr_fe_set_handlers(&vcon->chr, chr_can_read, chr_read,
+                                 k->is_console ? NULL : chr_event,
+                                 chr_be_change, vcon, NULL, false);
+    } else {
+        qemu_chr_fe_set_handlers(&vcon->chr, NULL, NULL, NULL,
+                                 NULL, NULL, NULL, false);
     }
 }
 
@@ -168,7 +219,6 @@ static void virtconsole_realize(DeviceState *dev, Error **errp)
     VirtIOSerialPort *port = VIRTIO_SERIAL_PORT(dev);
     VirtConsole *vcon = VIRTIO_CONSOLE(dev);
     VirtIOSerialPortClass *k = VIRTIO_SERIAL_PORT_GET_CLASS(dev);
-    Chardev *chr = qemu_chr_fe_get_driver(&vcon->chr);
 
     if (port->id == 0 && !k->is_console) {
         error_setg(errp, "Port number 0 on virtio-serial devices reserved "
@@ -176,7 +226,7 @@ static void virtconsole_realize(DeviceState *dev, Error **errp)
         return;
     }
 
-    if (chr) {
+    if (qemu_chr_fe_backend_connected(&vcon->chr)) {
         /*
          * For consoles we don't block guest data transfer just
          * because nothing is connected - we'll just let it go
@@ -188,11 +238,13 @@ static void virtconsole_realize(DeviceState *dev, Error **errp)
          */
         if (k->is_console) {
             qemu_chr_fe_set_handlers(&vcon->chr, chr_can_read, chr_read,
-                                     NULL, vcon, NULL, true);
+                                     NULL, chr_be_change,
+                                     vcon, NULL, true);
             virtio_serial_open(port);
         } else {
             qemu_chr_fe_set_handlers(&vcon->chr, chr_can_read, chr_read,
-                                     chr_event, vcon, NULL, false);
+                                     chr_event, chr_be_change,
+                                     vcon, NULL, false);
         }
     }
 }
@@ -233,8 +285,9 @@ static void virtserialport_class_init(ObjectClass *klass, void *data)
     k->unrealize = virtconsole_unrealize;
     k->have_data = flush_buf;
     k->set_guest_connected = set_guest_connected;
+    k->enable_backend = virtconsole_enable_backend;
     k->guest_writable = guest_writable;
-    dc->props = virtserialport_properties;
+    device_class_set_props(dc, virtserialport_properties);
 }
 
 static const TypeInfo virtserialport_info = {

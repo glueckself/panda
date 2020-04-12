@@ -31,12 +31,20 @@ static QemuOptsList qemu_fsdev_opts = {
         }, {
             .name = "readonly",
             .type = QEMU_OPT_BOOL,
-
+        }, {
+            .name = "multidevs",
+            .type = QEMU_OPT_STRING,
         }, {
             .name = "socket",
             .type = QEMU_OPT_STRING,
         }, {
             .name = "sock_fd",
+            .type = QEMU_OPT_NUMBER,
+        }, {
+            .name = "fmode",
+            .type = QEMU_OPT_NUMBER,
+        }, {
+            .name = "dmode",
             .type = QEMU_OPT_NUMBER,
         },
 
@@ -70,10 +78,19 @@ static QemuOptsList qemu_virtfs_opts = {
             .name = "readonly",
             .type = QEMU_OPT_BOOL,
         }, {
+            .name = "multidevs",
+            .type = QEMU_OPT_STRING,
+        }, {
             .name = "socket",
             .type = QEMU_OPT_STRING,
         }, {
             .name = "sock_fd",
+            .type = QEMU_OPT_NUMBER,
+        }, {
+            .name = "fmode",
+            .type = QEMU_OPT_NUMBER,
+        }, {
+            .name = "dmode",
             .type = QEMU_OPT_NUMBER,
         },
 

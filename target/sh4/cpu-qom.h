@@ -20,13 +20,13 @@
 #ifndef QEMU_SUPERH_CPU_QOM_H
 #define QEMU_SUPERH_CPU_QOM_H
 
-#include "qom/cpu.h"
+#include "hw/core/cpu.h"
 
 #define TYPE_SUPERH_CPU "superh-cpu"
 
-#define TYPE_SH7750R_CPU "sh7750r-" TYPE_SUPERH_CPU
-#define TYPE_SH7751R_CPU "sh7751r-" TYPE_SUPERH_CPU
-#define TYPE_SH7785_CPU "sh7785-" TYPE_SUPERH_CPU
+#define TYPE_SH7750R_CPU SUPERH_CPU_TYPE_NAME("sh7750r")
+#define TYPE_SH7751R_CPU SUPERH_CPU_TYPE_NAME("sh7751r")
+#define TYPE_SH7785_CPU  SUPERH_CPU_TYPE_NAME("sh7785")
 
 #define SUPERH_CPU_CLASS(klass) \
     OBJECT_CLASS_CHECK(SuperHCPUClass, (klass), TYPE_SUPERH_CPU)
@@ -39,7 +39,6 @@
  * SuperHCPUClass:
  * @parent_realize: The parent class' realize handler.
  * @parent_reset: The parent class' reset handler.
- * @name: The name.
  * @pvr: Processor Version Register
  * @prr: Processor Revision Register
  * @cvr: Cache Version Register
@@ -52,9 +51,8 @@ typedef struct SuperHCPUClass {
     /*< public >*/
 
     DeviceRealize parent_realize;
-    void (*parent_reset)(CPUState *cpu);
+    DeviceReset parent_reset;
 
-    const char *name;
     uint32_t pvr;
     uint32_t prr;
     uint32_t cvr;

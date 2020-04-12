@@ -17,7 +17,6 @@
 #define QEMU_VIRTIO_SERIAL_H
 
 #include "standard-headers/linux/virtio_console.h"
-#include "hw/qdev.h"
 #include "hw/virtio/virtio.h"
 
 struct virtio_serial_conf {
@@ -57,6 +56,9 @@ typedef struct VirtIOSerialPortClass {
     /* Callbacks for guest events */
         /* Guest opened/closed device. */
     void (*set_guest_connected)(VirtIOSerialPort *port, int guest_connected);
+
+    /* Enable/disable backend for virtio serial port */
+    void (*enable_backend)(VirtIOSerialPort *port, bool enable);
 
         /* Guest is now ready to accept data (virtqueues set up). */
     void (*guest_ready)(VirtIOSerialPort *port);

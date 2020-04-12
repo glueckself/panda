@@ -8,7 +8,20 @@
 #ifndef HW_MISC_UNIMP_H
 #define HW_MISC_UNIMP_H
 
+#include "hw/qdev-properties.h"
+#include "hw/sysbus.h"
+
 #define TYPE_UNIMPLEMENTED_DEVICE "unimplemented-device"
+
+#define UNIMPLEMENTED_DEVICE(obj) \
+    OBJECT_CHECK(UnimplementedDeviceState, (obj), TYPE_UNIMPLEMENTED_DEVICE)
+
+typedef struct {
+    SysBusDevice parent_obj;
+    MemoryRegion iomem;
+    char *name;
+    uint64_t size;
+} UnimplementedDeviceState;
 
 /**
  * create_unimplemented_device: create and map a dummy device

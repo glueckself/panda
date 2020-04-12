@@ -23,12 +23,13 @@
  */
 
 #include "qemu/osdep.h"
-#include "hw/hw.h"
 #include "hw/ipmi/ipmi.h"
-#include "sysemu/sysemu.h"
-#include "qmp-commands.h"
+#include "hw/qdev-properties.h"
 #include "qom/object_interfaces.h"
-#include "qapi/visitor.h"
+#include "sysemu/runstate.h"
+#include "qapi/error.h"
+#include "qemu/module.h"
+#include "hw/nmi.h"
 
 static uint32_t ipmi_current_uuid = 1;
 
@@ -44,21 +45,22 @@ static int ipmi_do_hw_op(IPMIInterface *s, enum ipmi_op op, int checkonly)
         if (checkonly) {
             return 0;
         }
-        qemu_system_reset_request();
+        qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);
         return 0;
 
     case IPMI_POWEROFF_CHASSIS:
         if (checkonly) {
             return 0;
         }
-        qemu_system_shutdown_request();
+        qemu_system_shutdown_request(SHUTDOWN_CAUSE_GUEST_SHUTDOWN);
         return 0;
 
     case IPMI_SEND_NMI:
         if (checkonly) {
             return 0;
         }
-        qmp_inject_nmi(NULL);
+        /* We don't care what CPU we use. */
+        nmi_monitor_handle(0, NULL);
         return 0;
 
     case IPMI_SHUTDOWN_VIA_ACPI_OVERTEMP:
@@ -90,7 +92,7 @@ static TypeInfo ipmi_interface_type_info = {
     .class_init = ipmi_interface_class_init,
 };
 
-static void isa_ipmi_bmc_check(Object *obj, const char *name,
+static void isa_ipmi_bmc_check(const Object *obj, const char *name,
                                Object *val, Error **errp)
 {
     IPMIBmc *bmc = IPMI_BMC(val);
@@ -103,7 +105,7 @@ void ipmi_bmc_find_and_link(Object *obj, Object **bmc)
 {
     object_property_add_link(obj, "bmc", TYPE_IPMI_BMC, bmc,
                              isa_ipmi_bmc_check,
-                             OBJ_PROP_LINK_UNREF_ON_RELEASE,
+                             OBJ_PROP_LINK_STRONG,
                              &error_abort);
 }
 
@@ -116,7 +118,7 @@ static void bmc_class_init(ObjectClass *oc, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(oc);
 
-    dc->props = ipmi_bmc_properties;
+    device_class_set_props(dc, ipmi_bmc_properties);
 }
 
 static TypeInfo ipmi_bmc_type_info = {

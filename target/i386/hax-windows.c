@@ -12,7 +12,6 @@
 
 #include "qemu/osdep.h"
 #include "cpu.h"
-#include "exec/exec-all.h"
 #include "hax-i386.h"
 
 /*
@@ -58,10 +57,9 @@ static int hax_open_device(hax_fd *fd)
     return fd;
 }
 
-int hax_populate_ram(uint64_t va, uint32_t size)
+int hax_populate_ram(uint64_t va, uint64_t size)
 {
     int ret;
-    struct hax_alloc_ram_info info;
     HANDLE hDeviceVM;
     DWORD dSize = 0;
 
@@ -70,18 +68,35 @@ int hax_populate_ram(uint64_t va, uint32_t size)
         return -EINVAL;
     }
 
-    info.size = size;
-    info.va = va;
-
     hDeviceVM = hax_global.vm->fd;
+    if (hax_global.supports_64bit_ramblock) {
+        struct hax_ramblock_info ramblock = {
+            .start_va = va,
+            .size = size,
+            .reserved = 0
+        };
 
-    ret = DeviceIoControl(hDeviceVM,
-                          HAX_VM_IOCTL_ALLOC_RAM,
-                          &info, sizeof(info), NULL, 0, &dSize,
-                          (LPOVERLAPPED) NULL);
+        ret = DeviceIoControl(hDeviceVM,
+                              HAX_VM_IOCTL_ADD_RAMBLOCK,
+                              &ramblock, sizeof(ramblock), NULL, 0, &dSize,
+                              (LPOVERLAPPED) NULL);
+    } else {
+        struct hax_alloc_ram_info info = {
+            .size = (uint32_t) size,
+            .pad = 0,
+            .va = va
+        };
+
+        ret = DeviceIoControl(hDeviceVM,
+                              HAX_VM_IOCTL_ALLOC_RAM,
+                              &info, sizeof(info), NULL, 0, &dSize,
+                              (LPOVERLAPPED) NULL);
+    }
 
     if (!ret) {
-        fprintf(stderr, "Failed to allocate %x memory\n", size);
+        fprintf(stderr, "Failed to register RAM block: va=0x%" PRIx64
+                ", size=0x%" PRIx64 ", method=%s\n", va, size,
+                hax_global.supports_64bit_ramblock ? "new" : "legacy");
         return ret;
     }
 
@@ -170,41 +185,12 @@ int hax_mod_version(struct hax_state *hax, struct hax_module_version *version)
 
 static char *hax_vm_devfs_string(int vm_id)
 {
-    char *name;
-
-    if (vm_id > MAX_VM_ID) {
-        fprintf(stderr, "Too big VM id\n");
-        return NULL;
-    }
-
-#define HAX_VM_DEVFS "\\\\.\\hax_vmxx"
-    name = g_strdup(HAX_VM_DEVFS);
-    if (!name) {
-        return NULL;
-    }
-
-    snprintf(name, sizeof HAX_VM_DEVFS, "\\\\.\\hax_vm%02d", vm_id);
-    return name;
+    return g_strdup_printf("/dev/hax_vm/vm%02d", vm_id);
 }
 
 static char *hax_vcpu_devfs_string(int vm_id, int vcpu_id)
 {
-    char *name;
-
-    if (vm_id > MAX_VM_ID || vcpu_id > MAX_VCPU_ID) {
-        fprintf(stderr, "Too big vm id %x or vcpu id %x\n", vm_id, vcpu_id);
-        return NULL;
-    }
-
-#define HAX_VCPU_DEVFS "\\\\.\\hax_vmxx_vcpuxx"
-    name = g_strdup(HAX_VCPU_DEVFS);
-    if (!name) {
-        return NULL;
-    }
-
-    snprintf(name, sizeof HAX_VCPU_DEVFS, "\\\\.\\hax_vm%02d_vcpu%02d",
-             vm_id, vcpu_id);
-    return name;
+    return g_strdup_printf("/dev/hax_vm%02d/vcpu%02d", vm_id, vcpu_id);
 }
 
 int hax_host_create_vm(struct hax_state *hax, int *vmid)

@@ -11,8 +11,12 @@
 #include "qemu/osdep.h"
 
 #include "qapi/error.h"
+#include "qapi/qmp/qdict.h"
+#include "qemu/option.h"
+#include "qemu/main-loop.h"
 #include "replication.h"
 #include "block/block_int.h"
+#include "block/qdict.h"
 #include "sysemu/block-backend.h"
 
 #define IMG_SIZE (64 * 1024 * 1024)
@@ -144,18 +148,18 @@ static void prepare_imgs(void)
 
     /* Primary */
     bdrv_img_create(p_local_disk, "qcow2", NULL, NULL, NULL, IMG_SIZE,
-                    BDRV_O_RDWR, &local_err, true);
+                    BDRV_O_RDWR, true, &local_err);
     g_assert(!local_err);
 
     /* Secondary */
     bdrv_img_create(s_local_disk, "qcow2", NULL, NULL, NULL, IMG_SIZE,
-                    BDRV_O_RDWR, &local_err, true);
+                    BDRV_O_RDWR, true, &local_err);
     g_assert(!local_err);
     bdrv_img_create(s_active_disk, "qcow2", NULL, NULL, NULL, IMG_SIZE,
-                    BDRV_O_RDWR, &local_err, true);
+                    BDRV_O_RDWR, true, &local_err);
     g_assert(!local_err);
     bdrv_img_create(s_hidden_disk, "qcow2", NULL, NULL, NULL, IMG_SIZE,
-                    BDRV_O_RDWR, &local_err, true);
+                    BDRV_O_RDWR, true, &local_err);
     g_assert(!local_err);
 }
 
@@ -179,7 +183,8 @@ static BlockBackend *start_primary(void)
     char *cmdline;
 
     cmdline = g_strdup_printf("driver=replication,mode=primary,node-name=xxx,"
-                              "file.driver=qcow2,file.file.filename=%s"
+                              "file.driver=qcow2,file.file.filename=%s,"
+                              "file.file.locking=off"
                               , p_local_disk);
     opts = qemu_opts_parse_noisily(&qemu_drive_opts, cmdline, false);
     g_free(cmdline);
@@ -203,13 +208,17 @@ static BlockBackend *start_primary(void)
 static void teardown_primary(void)
 {
     BlockBackend *blk;
+    AioContext *ctx;
 
     /* remove P_ID */
     blk = blk_by_name(P_ID);
     assert(blk);
 
+    ctx = blk_get_aio_context(blk);
+    aio_context_acquire(ctx);
     monitor_remove_blk(blk);
     blk_unref(blk);
+    aio_context_release(ctx);
 }
 
 static void test_primary_read(void)
@@ -310,7 +319,9 @@ static BlockBackend *start_secondary(void)
     Error *local_err = NULL;
 
     /* add s_local_disk and forge S_LOCAL_DISK_ID */
-    cmdline = g_strdup_printf("file.filename=%s,driver=qcow2", s_local_disk);
+    cmdline = g_strdup_printf("file.filename=%s,driver=qcow2,"
+                              "file.locking=off",
+                              s_local_disk);
     opts = qemu_opts_parse_noisily(&qemu_drive_opts, cmdline, false);
     g_free(cmdline);
 
@@ -331,8 +342,10 @@ static BlockBackend *start_secondary(void)
     /* add S_(ACTIVE/HIDDEN)_DISK and forge S_ID */
     cmdline = g_strdup_printf("driver=replication,mode=secondary,top-id=%s,"
                               "file.driver=qcow2,file.file.filename=%s,"
+                              "file.file.locking=off,"
                               "file.backing.driver=qcow2,"
                               "file.backing.file.filename=%s,"
+                              "file.backing.file.locking=off,"
                               "file.backing.backing=%s"
                               , S_ID, s_active_disk, s_hidden_disk
                               , S_LOCAL_DISK_ID);
@@ -357,20 +370,27 @@ static void teardown_secondary(void)
 {
     /* only need to destroy two BBs */
     BlockBackend *blk;
+    AioContext *ctx;
 
     /* remove S_LOCAL_DISK_ID */
     blk = blk_by_name(S_LOCAL_DISK_ID);
     assert(blk);
 
+    ctx = blk_get_aio_context(blk);
+    aio_context_acquire(ctx);
     monitor_remove_blk(blk);
     blk_unref(blk);
+    aio_context_release(ctx);
 
     /* remove S_ID */
     blk = blk_by_name(S_ID);
     assert(blk);
 
+    ctx = blk_get_aio_context(blk);
+    aio_context_acquire(ctx);
     monitor_remove_blk(blk);
     blk_unref(blk);
+    aio_context_release(ctx);
 }
 
 static void test_secondary_read(void)
@@ -456,6 +476,56 @@ static void test_secondary_stop(void)
 
     /* do active commit */
     replication_stop_all(failover, &local_err);
+    g_assert(!local_err);
+
+    /* read from s_local_disk (0, IMG_SIZE / 2) */
+    test_blk_read(top_blk, 0x33, 0, IMG_SIZE / 2,
+                  0, IMG_SIZE / 2, false);
+
+
+    /* read from s_local_disk (IMG_SIZE / 2, IMG_SIZE) */
+    test_blk_read(top_blk, 0x22, IMG_SIZE / 2,
+                  IMG_SIZE / 2, 0, IMG_SIZE, false);
+
+    teardown_secondary();
+}
+
+static void test_secondary_continuous_replication(void)
+{
+    BlockBackend *top_blk, *local_blk;
+    Error *local_err = NULL;
+
+    top_blk = start_secondary();
+    replication_start_all(REPLICATION_MODE_SECONDARY, &local_err);
+    g_assert(!local_err);
+
+    /* write 0x22 to s_local_disk (IMG_SIZE / 2, IMG_SIZE) */
+    local_blk = blk_by_name(S_LOCAL_DISK_ID);
+    test_blk_write(local_blk, 0x22, IMG_SIZE / 2, IMG_SIZE / 2, false);
+
+    /* replication will backup s_local_disk to s_hidden_disk */
+    test_blk_read(top_blk, 0x11, IMG_SIZE / 2,
+                  IMG_SIZE / 2, 0, IMG_SIZE, false);
+
+    /* write 0x33 to s_active_disk (0, IMG_SIZE / 2) */
+    test_blk_write(top_blk, 0x33, 0, IMG_SIZE / 2, false);
+
+    /* do failover (active commit) */
+    replication_stop_all(true, &local_err);
+    g_assert(!local_err);
+
+    /* it should ignore all requests from now on */
+
+    /* start after failover */
+    replication_start_all(REPLICATION_MODE_PRIMARY, &local_err);
+    g_assert(!local_err);
+
+    /* checkpoint */
+    replication_do_checkpoint_all(&local_err);
+    g_assert(!local_err);
+
+    /* stop */
+    replication_stop_all(true, &local_err);
     g_assert(!local_err);
 
     /* read from s_local_disk (0, IMG_SIZE / 2) */
@@ -565,6 +635,8 @@ int main(int argc, char **argv)
     g_test_add_func("/replication/secondary/write", test_secondary_write);
     g_test_add_func("/replication/secondary/start", test_secondary_start);
     g_test_add_func("/replication/secondary/stop",  test_secondary_stop);
+    g_test_add_func("/replication/secondary/continuous_replication",
+                    test_secondary_continuous_replication);
     g_test_add_func("/replication/secondary/do_checkpoint",
                     test_secondary_do_checkpoint);
     g_test_add_func("/replication/secondary/get_error_all",

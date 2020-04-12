@@ -19,18 +19,21 @@
  */
 
 #include "qemu/osdep.h"
-#include "hw/hw.h"
+#include "qemu-common.h"
 #include "hw/pci/pci.h"
+#include "hw/qdev-properties.h"
 #include "sysemu/dma.h"
 #include "sysemu/block-backend.h"
 #include "hw/pci/msi.h"
 #include "hw/pci/msix.h"
 #include "qemu/iov.h"
+#include "qemu/module.h"
 #include "hw/scsi/scsi.h"
-#include "block/scsi.h"
+#include "scsi/constants.h"
 #include "trace.h"
 #include "qapi/error.h"
 #include "mfi.h"
+#include "migration/vmstate.h"
 
 #define MEGASAS_VERSION_GEN1 "1.70"
 #define MEGASAS_VERSION_GEN2 "1.80"
@@ -464,6 +467,7 @@ static void megasas_unmap_frame(MegasasState *s, MegasasCmd *cmd)
     cmd->frame = NULL;
     cmd->pa = 0;
     cmd->pa_size = 0;
+    qemu_sglist_destroy(&cmd->qsg);
     clear_bit(cmd->index, s->frame_map);
 }
 
@@ -476,7 +480,7 @@ static MegasasCmd *megasas_enqueue_frame(MegasasState *s,
 {
     PCIDevice *pcid = PCI_DEVICE(s);
     MegasasCmd *cmd = NULL;
-    int frame_size = MFI_FRAME_SIZE * 16;
+    int frame_size = MEGASAS_MAX_SGE * sizeof(union mfi_sgl);
     hwaddr frame_size_p = frame_size;
     unsigned long index;
 
@@ -580,7 +584,6 @@ static void megasas_complete_frame(MegasasState *s, uint64_t context)
 
 static void megasas_complete_command(MegasasCmd *cmd)
 {
-    qemu_sglist_destroy(&cmd->qsg);
     cmd->iov_size = 0;
     cmd->iov_offset = 0;
 
@@ -609,6 +612,9 @@ static void megasas_reset_frames(MegasasState *s)
 static void megasas_abort_command(MegasasCmd *cmd)
 {
     /* Never abort internal commands.  */
+    if (cmd->dcmd_opcode != -1) {
+        return;
+    }
     if (cmd->req != NULL) {
         scsi_req_cancel(cmd->req);
     }
@@ -1017,7 +1023,6 @@ static int megasas_pd_get_info_submit(SCSIDevice *sdev, int lun,
     uint64_t pd_size;
     uint16_t pd_id = ((sdev->id & 0xFF) << 8) | (lun & 0xFF);
     uint8_t cmdbuf[6];
-    SCSIRequest *req;
     size_t len, resid;
 
     if (!cmd->iov_buf) {
@@ -1026,8 +1031,8 @@ static int megasas_pd_get_info_submit(SCSIDevice *sdev, int lun,
         info->inquiry_data[0] = 0x7f; /* Force PQual 0x3, PType 0x1f */
         info->vpd_page83[0] = 0x7f;
         megasas_setup_inquiry(cmdbuf, 0, sizeof(info->inquiry_data));
-        req = scsi_req_new(sdev, cmd->index, lun, cmdbuf, cmd);
-        if (!req) {
+        cmd->req = scsi_req_new(sdev, cmd->index, lun, cmdbuf, cmd);
+        if (!cmd->req) {
             trace_megasas_dcmd_req_alloc_failed(cmd->index,
                                                 "PD get info std inquiry");
             g_free(cmd->iov_buf);
@@ -1036,26 +1041,26 @@ static int megasas_pd_get_info_submit(SCSIDevice *sdev, int lun,
         }
         trace_megasas_dcmd_internal_submit(cmd->index,
                                            "PD get info std inquiry", lun);
-        len = scsi_req_enqueue(req);
+        len = scsi_req_enqueue(cmd->req);
         if (len > 0) {
             cmd->iov_size = len;
-            scsi_req_continue(req);
+            scsi_req_continue(cmd->req);
         }
         return MFI_STAT_INVALID_STATUS;
     } else if (info->inquiry_data[0] != 0x7f && info->vpd_page83[0] == 0x7f) {
         megasas_setup_inquiry(cmdbuf, 0x83, sizeof(info->vpd_page83));
-        req = scsi_req_new(sdev, cmd->index, lun, cmdbuf, cmd);
-        if (!req) {
+        cmd->req = scsi_req_new(sdev, cmd->index, lun, cmdbuf, cmd);
+        if (!cmd->req) {
             trace_megasas_dcmd_req_alloc_failed(cmd->index,
                                                 "PD get info vpd inquiry");
             return MFI_STAT_FLASH_ALLOC_FAIL;
         }
         trace_megasas_dcmd_internal_submit(cmd->index,
                                            "PD get info vpd inquiry", lun);
-        len = scsi_req_enqueue(req);
+        len = scsi_req_enqueue(cmd->req);
         if (len > 0) {
             cmd->iov_size = len;
-            scsi_req_continue(req);
+            scsi_req_continue(cmd->req);
         }
         return MFI_STAT_INVALID_STATUS;
     }
@@ -1217,7 +1222,6 @@ static int megasas_ld_get_info_submit(SCSIDevice *sdev, int lun,
     struct mfi_ld_info *info = cmd->iov_buf;
     size_t dcmd_size = sizeof(struct mfi_ld_info);
     uint8_t cdb[6];
-    SCSIRequest *req;
     ssize_t len, resid;
     uint16_t sdev_id = ((sdev->id & 0xFF) << 8) | (lun & 0xFF);
     uint64_t ld_size;
@@ -1226,8 +1230,8 @@ static int megasas_ld_get_info_submit(SCSIDevice *sdev, int lun,
         cmd->iov_buf = g_malloc0(dcmd_size);
         info = cmd->iov_buf;
         megasas_setup_inquiry(cdb, 0x83, sizeof(info->vpd_page83));
-        req = scsi_req_new(sdev, cmd->index, lun, cdb, cmd);
-        if (!req) {
+        cmd->req = scsi_req_new(sdev, cmd->index, lun, cdb, cmd);
+        if (!cmd->req) {
             trace_megasas_dcmd_req_alloc_failed(cmd->index,
                                                 "LD get info vpd inquiry");
             g_free(cmd->iov_buf);
@@ -1236,10 +1240,10 @@ static int megasas_ld_get_info_submit(SCSIDevice *sdev, int lun,
         }
         trace_megasas_dcmd_internal_submit(cmd->index,
                                            "LD get info vpd inquiry", lun);
-        len = scsi_req_enqueue(req);
+        len = scsi_req_enqueue(cmd->req);
         if (len > 0) {
             cmd->iov_size = len;
-            scsi_req_continue(req);
+            scsi_req_continue(cmd->req);
         }
         return MFI_STAT_INVALID_STATUS;
     }
@@ -1851,7 +1855,7 @@ static void megasas_command_complete(SCSIRequest *req, uint32_t status,
         return;
     }
 
-    if (cmd->req == NULL) {
+    if (cmd->dcmd_opcode != -1) {
         /*
          * Internal command complete
          */
@@ -2371,7 +2375,7 @@ static void megasas_scsi_realize(PCIDevice *dev, Error **errp)
     if (!s->sas_addr) {
         s->sas_addr = ((NAA_LOCALLY_ASSIGNED_ID << 24) |
                        IEEE_COMPANY_LOCALLY_ASSIGNED) << 36;
-        s->sas_addr |= (pci_bus_num(dev->bus) << 16);
+        s->sas_addr |= (pci_dev_bus_num(dev) << 16);
         s->sas_addr |= (PCI_SLOT(dev->devfn) << 8);
         s->sas_addr |= PCI_FUNC(dev->devfn);
     }
@@ -2446,10 +2450,10 @@ typedef struct MegasasInfo {
     uint16_t subsystem_id;
     int ioport_bar;
     int mmio_bar;
-    bool is_express;
     int osts;
     const VMStateDescription *vmsd;
     Property *props;
+    InterfaceInfo *interfaces;
 } MegasasInfo;
 
 static struct MegasasInfo megasas_devices[] = {
@@ -2463,9 +2467,12 @@ static struct MegasasInfo megasas_devices[] = {
         .ioport_bar = 2,
         .mmio_bar = 0,
         .osts = MFI_1078_RM | 1,
-        .is_express = false,
         .vmsd = &vmstate_megasas_gen1,
         .props = megasas_properties_gen1,
+        .interfaces = (InterfaceInfo[]) {
+            { INTERFACE_CONVENTIONAL_PCI_DEVICE },
+            { },
+        },
     },{
         .name = TYPE_MEGASAS_GEN2,
         .desc = "LSI MegaRAID SAS 2108",
@@ -2476,9 +2483,12 @@ static struct MegasasInfo megasas_devices[] = {
         .ioport_bar = 0,
         .mmio_bar = 1,
         .osts = MFI_GEN2_RM,
-        .is_express = true,
         .vmsd = &vmstate_megasas_gen2,
         .props = megasas_properties_gen2,
+        .interfaces = (InterfaceInfo[]) {
+            { INTERFACE_PCIE_DEVICE },
+            { }
+        },
     }
 };
 
@@ -2496,13 +2506,12 @@ static void megasas_class_init(ObjectClass *oc, void *data)
     pc->subsystem_vendor_id = PCI_VENDOR_ID_LSI_LOGIC;
     pc->subsystem_id = info->subsystem_id;
     pc->class_id = PCI_CLASS_STORAGE_RAID;
-    pc->is_express = info->is_express;
     e->mmio_bar = info->mmio_bar;
     e->ioport_bar = info->ioport_bar;
     e->osts = info->osts;
     e->product_name = info->product_name;
     e->product_version = info->product_version;
-    dc->props = info->props;
+    device_class_set_props(dc, info->props);
     dc->reset = megasas_scsi_reset;
     dc->vmsd = info->vmsd;
     set_bit(DEVICE_CATEGORY_STORAGE, dc->categories);
@@ -2530,6 +2539,7 @@ static void megasas_register_types(void)
         type_info.parent = TYPE_MEGASAS_BASE;
         type_info.class_data = (void *)info;
         type_info.class_init = megasas_class_init;
+        type_info.interfaces = info->interfaces;
 
         type_register(&type_info);
     }

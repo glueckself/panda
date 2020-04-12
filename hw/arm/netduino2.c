@@ -25,16 +25,17 @@
 #include "qemu/osdep.h"
 #include "qapi/error.h"
 #include "hw/boards.h"
+#include "hw/qdev-properties.h"
 #include "qemu/error-report.h"
 #include "hw/arm/stm32f205_soc.h"
-#include "hw/arm/arm.h"
+#include "hw/arm/boot.h"
 
 static void netduino2_init(MachineState *machine)
 {
     DeviceState *dev;
 
     dev = qdev_create(NULL, TYPE_STM32F205_SOC);
-    qdev_prop_set_string(dev, "cpu-model", "cortex-m3");
+    qdev_prop_set_string(dev, "cpu-type", ARM_CPU_TYPE_NAME("cortex-m3"));
     object_property_set_bool(OBJECT(dev), true, "realized", &error_fatal);
 
     armv7m_load_kernel(ARM_CPU(first_cpu), machine->kernel_filename,
@@ -45,6 +46,7 @@ static void netduino2_machine_init(MachineClass *mc)
 {
     mc->desc = "Netduino 2 Machine";
     mc->init = netduino2_init;
+    mc->ignore_memory_transaction_failures = true;
 }
 
 DEFINE_MACHINE("netduino2", netduino2_machine_init)

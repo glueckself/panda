@@ -27,6 +27,7 @@
 #include "qemu/thread.h"
 #include "qemu/queue.h"
 #include "qemu/atomic.h"
+#include "qemu/sys_membarrier.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -79,7 +80,10 @@ static inline void rcu_read_lock(void)
     }
 
     ctr = atomic_read(&rcu_gp_ctr);
-    atomic_xchg(&p_rcu_reader->ctr, ctr);
+    atomic_set(&p_rcu_reader->ctr, ctr);
+
+    /* Write p_rcu_reader->ctr before reading RCU-protected pointers.  */
+    smp_mb_placeholder();
 }
 
 static inline void rcu_read_unlock(void)
@@ -91,7 +95,15 @@ static inline void rcu_read_unlock(void)
         return;
     }
 
-    atomic_xchg(&p_rcu_reader->ctr, 0);
+    /* Ensure that the critical section is seen to precede the
+     * store to p_rcu_reader->ctr.  Together with the following
+     * smp_mb_placeholder(), this ensures writes to p_rcu_reader->ctr
+     * are sequentially consistent.
+     */
+    atomic_store_release(&p_rcu_reader->ctr, 0);
+
+    /* Write p_rcu_reader->ctr before reading p_rcu_reader->waiting.  */
+    smp_mb_placeholder();
     if (unlikely(atomic_read(&p_rcu_reader->waiting))) {
         atomic_set(&p_rcu_reader->waiting, false);
         qemu_event_set(&rcu_gp_event);
@@ -105,7 +117,12 @@ extern void synchronize_rcu(void);
  */
 extern void rcu_register_thread(void);
 extern void rcu_unregister_thread(void);
-extern void rcu_after_fork(void);
+
+/*
+ * Support for fork().  fork() support is enabled at startup.
+ */
+extern void rcu_enable_atfork(void);
+extern void rcu_disable_atfork(void);
 
 struct rcu_head;
 typedef void RCUCBFunc(struct rcu_head *head);
@@ -136,6 +153,31 @@ extern void call_rcu1(struct rcu_head *head, RCUCBFunc *func);
         &(obj)->field;                                                   \
       }),                                                                \
       (RCUCBFunc *)g_free);
+
+typedef void RCUReadAuto;
+static inline RCUReadAuto *rcu_read_auto_lock(void)
+{
+    rcu_read_lock();
+    /* Anything non-NULL causes the cleanup function to be called */
+    return (void *)(uintptr_t)0x1;
+}
+
+static inline void rcu_read_auto_unlock(RCUReadAuto *r)
+{
+    rcu_read_unlock();
+}
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(RCUReadAuto, rcu_read_auto_unlock)
+
+#define WITH_RCU_READ_LOCK_GUARD() \
+    WITH_RCU_READ_LOCK_GUARD_(_rcu_read_auto##__COUNTER__)
+
+#define WITH_RCU_READ_LOCK_GUARD_(var) \
+    for (g_autoptr(RCUReadAuto) var = rcu_read_auto_lock(); \
+        (var); rcu_read_auto_unlock(var), (var) = NULL)
+
+#define RCU_READ_LOCK_GUARD() \
+    g_autoptr(RCUReadAuto) _rcu_read_auto __attribute__((unused)) = rcu_read_auto_lock()
 
 #ifdef __cplusplus
 }

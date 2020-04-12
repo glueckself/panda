@@ -12,8 +12,8 @@
 #ifndef QEMU_VIRTIO_RNG_H
 #define QEMU_VIRTIO_RNG_H
 
+#include "hw/virtio/virtio.h"
 #include "sysemu/rng.h"
-#include "sysemu/rng-random.h"
 #include "standard-headers/linux/virtio_rng.h"
 
 #define TYPE_VIRTIO_RNG "virtio-rng-device"
@@ -26,7 +26,6 @@ struct VirtIORNGConf {
     RngBackend *rng;
     uint64_t max_bytes;
     uint32_t period_ms;
-    RngRandom *default_backend;
 };
 
 typedef struct VirtIORNG {
@@ -45,6 +44,8 @@ typedef struct VirtIORNG {
     QEMUTimer *rate_limit_timer;
     int64_t quota_remaining;
     bool activate_timer;
+
+    VMChangeStateEntry *vmstate;
 } VirtIORNG;
 
 #endif

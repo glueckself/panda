@@ -21,14 +21,17 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 #include "qemu/osdep.h"
+#include "qemu/module.h"
+#include "qemu/units.h"
 #include "qapi/error.h"
-#include "hw/hw.h"
 #include "hw/loader.h"
 #include "trace.h"
-#include "ui/console.h"
 #include "ui/vnc.h"
 #include "hw/pci/pci.h"
+#include "hw/qdev-properties.h"
+#include "migration/vmstate.h"
 
 #undef VERBOSE
 #define HW_RECT_ACCEL
@@ -566,7 +569,7 @@ static inline int vmsvga_fifo_length(struct vmsvga_state_s *s)
         s->fifo_next >= SVGA_FIFO_SIZE) {
         return 0;
     }
-    if (s->fifo_max < s->fifo_min + 10 * 1024) {
+    if (s->fifo_max < s->fifo_min + 10 * KiB) {
         return 0;
     }
 
@@ -679,10 +682,9 @@ static void vmsvga_fifo_run(struct vmsvga_state_s *s)
             if (cursor.width > 256
                 || cursor.height > 256
                 || cursor.bpp > 32
-                || SVGA_BITMAP_SIZE(x, y)
-                    > sizeof(cursor.mask) / sizeof(cursor.mask[0])
+                || SVGA_BITMAP_SIZE(x, y) > ARRAY_SIZE(cursor.mask)
                 || SVGA_PIXMAP_SIZE(x, y, cursor.bpp)
-                    > sizeof(cursor.image) / sizeof(cursor.image[0])) {
+                    > ARRAY_SIZE(cursor.image)) {
                     goto badcmd;
             }
 
@@ -1117,39 +1119,21 @@ static inline void vmsvga_check_size(struct vmsvga_state_s *s)
 static void vmsvga_update_display(void *opaque)
 {
     struct vmsvga_state_s *s = opaque;
-    DisplaySurface *surface;
-    bool dirty = false;
 
-    if (!s->enable) {
+    if (!s->enable || !s->config) {
+        /* in standard vga mode */
         s->vga.hw_ops->gfx_update(&s->vga);
         return;
     }
 
     vmsvga_check_size(s);
-    surface = qemu_console_surface(s->vga.con);
 
     vmsvga_fifo_run(s);
     vmsvga_update_rect_flush(s);
 
-    /*
-     * Is it more efficient to look at vram VGA-dirty bits or wait
-     * for the driver to issue SVGA_CMD_UPDATE?
-     */
-    if (memory_region_is_logging(&s->vga.vram, DIRTY_MEMORY_VGA)) {
-        vga_sync_dirty_bitmap(&s->vga);
-        dirty = memory_region_get_dirty(&s->vga.vram, 0,
-            surface_stride(surface) * surface_height(surface),
-            DIRTY_MEMORY_VGA);
-    }
-    if (s->invalidated || dirty) {
+    if (s->invalidated) {
         s->invalidated = 0;
-        dpy_gfx_update(s->vga.con, 0, 0,
-                   surface_width(surface), surface_height(surface));
-    }
-    if (dirty) {
-        memory_region_reset_dirty(&s->vga.vram, 0,
-            surface_stride(surface) * surface_height(surface),
-            DIRTY_MEMORY_VGA);
+        dpy_gfx_update_full(s->vga.con);
     }
 }
 
@@ -1207,7 +1191,7 @@ static const VMStateDescription vmstate_vmware_vga_internal = {
     .minimum_version_id = 0,
     .post_load = vmsvga_post_load,
     .fields = (VMStateField[]) {
-        VMSTATE_INT32_EQUAL(new_depth, struct vmsvga_state_s),
+        VMSTATE_INT32_EQUAL(new_depth, struct vmsvga_state_s, NULL),
         VMSTATE_INT32(enable, struct vmsvga_state_s),
         VMSTATE_INT32(config, struct vmsvga_state_s),
         VMSTATE_INT32(cursor.id, struct vmsvga_state_s),
@@ -1256,10 +1240,9 @@ static void vmsvga_init(DeviceState *dev, struct vmsvga_state_s *s,
     s->fifo_size = SVGA_FIFO_SIZE;
     memory_region_init_ram(&s->fifo_ram, NULL, "vmsvga.fifo", s->fifo_size,
                            &error_fatal);
-    vmstate_register_ram_global(&s->fifo_ram);
     s->fifo_ptr = memory_region_get_ram_ptr(&s->fifo_ram);
 
-    vga_common_init(&s->vga, OBJECT(dev), true);
+    vga_common_init(&s->vga, OBJECT(dev));
     vga_init(&s->vga, OBJECT(dev), address_space, io, true);
     vmstate_register(NULL, 0, &vmstate_vga_common, &s->vga);
     s->new_depth = 32;
@@ -1329,16 +1312,13 @@ static void pci_vmsvga_realize(PCIDevice *dev, Error **errp)
                      &s->chip.vga.vram);
     pci_register_bar(dev, 2, PCI_BASE_ADDRESS_MEM_PREFETCH,
                      &s->chip.fifo_ram);
-
-    if (!dev->rom_bar) {
-        /* compatibility with pc-0.13 and older */
-        vga_init_vbe(&s->chip.vga, OBJECT(dev), pci_address_space(dev));
-    }
 }
 
 static Property vga_vmware_properties[] = {
     DEFINE_PROP_UINT32("vgamem_mb", struct pci_vmsvga_state_s,
                        chip.vga.vram_size_mb, 16),
+    DEFINE_PROP_BOOL("global-vmstate", struct pci_vmsvga_state_s,
+                     chip.vga.global_vmstate, false),
     DEFINE_PROP_END_OF_LIST(),
 };
 
@@ -1356,7 +1336,7 @@ static void vmsvga_class_init(ObjectClass *klass, void *data)
     k->subsystem_id = SVGA_PCI_DEVICE_ID;
     dc->reset = vmsvga_reset;
     dc->vmsd = &vmstate_vmware_vga;
-    dc->props = vga_vmware_properties;
+    device_class_set_props(dc, vga_vmware_properties);
     dc->hotpluggable = false;
     set_bit(DEVICE_CATEGORY_DISPLAY, dc->categories);
 }
@@ -1366,6 +1346,10 @@ static const TypeInfo vmsvga_info = {
     .parent        = TYPE_PCI_DEVICE,
     .instance_size = sizeof(struct pci_vmsvga_state_s),
     .class_init    = vmsvga_class_init,
+    .interfaces = (InterfaceInfo[]) {
+        { INTERFACE_CONVENTIONAL_PCI_DEVICE },
+        { },
+    },
 };
 
 static void vmsvga_register_types(void)

@@ -12,21 +12,11 @@
  */
 
 #include "qemu/osdep.h"
-#include "hw/hw.h"
 #include "hw/sysbus.h"
 #include "hw/misc/unimp.h"
 #include "qemu/log.h"
+#include "qemu/module.h"
 #include "qapi/error.h"
-
-#define UNIMPLEMENTED_DEVICE(obj) \
-    OBJECT_CHECK(UnimplementedDeviceState, (obj), TYPE_UNIMPLEMENTED_DEVICE)
-
-typedef struct {
-    SysBusDevice parent_obj;
-    MemoryRegion iomem;
-    char *name;
-    uint64_t size;
-} UnimplementedDeviceState;
 
 static uint64_t unimp_read(void *opaque, hwaddr offset, unsigned size)
 {
@@ -89,7 +79,7 @@ static void unimp_class_init(ObjectClass *klass, void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->realize = unimp_realize;
-    dc->props = unimp_properties;
+    device_class_set_props(dc, unimp_properties);
 }
 
 static const TypeInfo unimp_info = {

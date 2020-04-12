@@ -24,6 +24,11 @@
 #include "qemu/host-utils.h"
 #include "exec/exec-all.h"
 #include "exec/cpu_ldst.h"
+#include "fpu/softfloat.h"
+
+#ifdef CONFIG_SOFTMMU
+#include "hw/irq.h"
+#endif
 
 #define FPU_RC_MASK         0xc00
 #define FPU_RC_NEAR         0x000
@@ -56,6 +61,36 @@
 #define floatx80_lg2 make_floatx80(0x3ffd, 0x9a209a84fbcff799LL)
 #define floatx80_l2e make_floatx80(0x3fff, 0xb8aa3b295c17f0bcLL)
 #define floatx80_l2t make_floatx80(0x4000, 0xd49a784bcd1b8afeLL)
+
+#if !defined(CONFIG_USER_ONLY)
+static qemu_irq ferr_irq;
+
+void x86_register_ferr_irq(qemu_irq irq)
+{
+    ferr_irq = irq;
+}
+
+static void cpu_clear_ignne(void)
+{
+    CPUX86State *env = &X86_CPU(first_cpu)->env;
+    env->hflags2 &= ~HF2_IGNNE_MASK;
+}
+
+void cpu_set_ignne(void)
+{
+    CPUX86State *env = &X86_CPU(first_cpu)->env;
+    env->hflags2 |= HF2_IGNNE_MASK;
+    /*
+     * We get here in response to a write to port F0h.  The chipset should
+     * deassert FP_IRQ and FERR# instead should stay signaled until FPSW_SE is
+     * cleared, because FERR# and FP_IRQ are two separate pins on real
+     * hardware.  However, we don't model FERR# as a qemu_irq, so we just
+     * do directly what the chipset would do, i.e. deassert FP_IRQ.
+     */
+    qemu_irq_lower(ferr_irq);
+}
+#endif
+
 
 static inline void fpush(CPUX86State *env)
 {
@@ -135,8 +170,8 @@ static void fpu_raise_exception(CPUX86State *env, uintptr_t retaddr)
         raise_exception_ra(env, EXCP10_COPR, retaddr);
     }
 #if !defined(CONFIG_USER_ONLY)
-    else {
-        cpu_set_ferr(env);
+    else if (ferr_irq && !(env->hflags2 & HF2_IGNNE_MASK)) {
+        qemu_irq_raise(ferr_irq);
     }
 #endif
 }
@@ -956,7 +991,11 @@ void helper_fxam_ST0(CPUX86State *env)
         env->fpus |= 0x200; /* C1 <-- 1 */
     }
 
-    /* XXX: test fptags too */
+    if (env->fptags[env->fpstt]) {
+        env->fpus |= 0x4100; /* Empty */
+        return;
+    }
+
     expdif = EXPD(temp);
     if (expdif == MAXEXPD) {
         if (MANTD(temp) == 0x8000000000000000ULL) {
@@ -1028,6 +1067,22 @@ void helper_fstenv(CPUX86State *env, target_ulong ptr, int data32)
     do_fstenv(env, ptr, data32, GETPC());
 }
 
+static void cpu_set_fpus(CPUX86State *env, uint16_t fpus)
+{
+    env->fpstt = (fpus >> 11) & 7;
+    env->fpus = fpus & ~0x3800 & ~FPUS_B;
+    env->fpus |= env->fpus & FPUS_SE ? FPUS_B : 0;
+#if !defined(CONFIG_USER_ONLY)
+    if (!(env->fpus & FPUS_SE)) {
+        /*
+         * Here the processor deasserts FERR#; in response, the chipset deasserts
+         * IGNNE#.
+         */
+        cpu_clear_ignne();
+    }
+#endif
+}
+
 static void do_fldenv(CPUX86State *env, target_ulong ptr, int data32,
                       uintptr_t retaddr)
 {
@@ -1042,8 +1097,7 @@ static void do_fldenv(CPUX86State *env, target_ulong ptr, int data32,
         fpus = cpu_lduw_data_ra(env, ptr + 2, retaddr);
         fptag = cpu_lduw_data_ra(env, ptr + 4, retaddr);
     }
-    env->fpstt = (fpus >> 11) & 7;
-    env->fpus = fpus & ~0x3800;
+    cpu_set_fpus(env, fpus);
     for (i = 0; i < 8; i++) {
         env->fptags[i] = ((fptag & 3) == 3);
         fptag >>= 2;
@@ -1291,8 +1345,7 @@ static void do_xrstor_fpu(CPUX86State *env, target_ulong ptr, uintptr_t ra)
     fpus = cpu_lduw_data_ra(env, ptr + XO(legacy.fsw), ra);
     fptag = cpu_lduw_data_ra(env, ptr + XO(legacy.ftw), ra);
     cpu_set_fpuc(env, fpuc);
-    env->fpstt = (fpus >> 11) & 7;
-    env->fpus = fpus & ~0x3800;
+    cpu_set_fpus(env, fpus);
     fptag ^= 0xff;
     for (i = 0; i < 8; i++) {
         env->fptags[i] = ((fptag >> i) & 1);
@@ -1476,7 +1529,7 @@ void helper_xrstor(CPUX86State *env, target_ulong ptr, uint64_t rfbm)
             env->pkru = 0;
         }
         if (env->pkru != old_pkru) {
-            CPUState *cs = CPU(x86_env_get_cpu(env));
+            CPUState *cs = env_cpu(env);
             tlb_flush(cs);
         }
     }
@@ -1539,24 +1592,6 @@ void helper_xsetbv(CPUX86State *env, uint32_t ecx, uint64_t mask)
     raise_exception_ra(env, EXCP0D_GPF, GETPC());
 }
 
-void cpu_get_fp80(uint64_t *pmant, uint16_t *pexp, floatx80 f)
-{
-    CPU_LDoubleU temp;
-
-    temp.d = f;
-    *pmant = temp.l.lower;
-    *pexp = temp.l.upper;
-}
-
-floatx80 cpu_set_fp80(uint64_t mant, uint16_t upper)
-{
-    CPU_LDoubleU temp;
-
-    temp.l.upper = upper;
-    temp.l.lower = mant;
-    return temp.d;
-}
-
 /* MMX/SSE */
 /* XXX: optimize by storing fptt and fptags in the static cpu state */
 
@@ -1568,11 +1603,10 @@ floatx80 cpu_set_fp80(uint64_t mant, uint16_t upper)
 #define SSE_RC_CHOP         0x6000
 #define SSE_FZ              0x8000
 
-void cpu_set_mxcsr(CPUX86State *env, uint32_t mxcsr)
+void update_mxcsr_status(CPUX86State *env)
 {
+    uint32_t mxcsr = env->mxcsr;
     int rnd_type;
-
-    env->mxcsr = mxcsr;
 
     /* set rounding mode */
     switch (mxcsr & SSE_RC_MASK) {
@@ -1597,12 +1631,6 @@ void cpu_set_mxcsr(CPUX86State *env, uint32_t mxcsr)
 
     /* set flush to zero */
     set_flush_to_zero((mxcsr & SSE_FZ) ? 1 : 0, &env->fp_status);
-}
-
-void cpu_set_fpuc(CPUX86State *env, uint16_t val)
-{
-    env->fpuc = val;
-    update_fp_status(env);
 }
 
 void helper_ldmxcsr(CPUX86State *env, uint32_t val)

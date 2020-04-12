@@ -25,8 +25,7 @@
 #ifndef VIRTIO_BUS_H
 #define VIRTIO_BUS_H
 
-#include "hw/qdev.h"
-#include "sysemu/sysemu.h"
+#include "hw/qdev-core.h"
 #include "hw/virtio/virtio.h"
 
 #define TYPE_VIRTIO_BUS "virtio-bus"
@@ -52,6 +51,8 @@ typedef struct VirtioBusClass {
     bool (*has_extra_state)(DeviceState *d);
     bool (*query_guest_notifiers)(DeviceState *d);
     int (*set_guest_notifiers)(DeviceState *d, int nvqs, bool assign);
+    int (*set_host_notifier_mr)(DeviceState *d, int n,
+                                MemoryRegion *mr, bool assign);
     void (*vmstate_change)(DeviceState *d, bool running);
     /*
      * Expose the features the transport layer supports before
@@ -148,5 +149,7 @@ int virtio_bus_grab_ioeventfd(VirtioBusState *bus);
 void virtio_bus_release_ioeventfd(VirtioBusState *bus);
 /* Switch from/to the generic ioeventfd handler */
 int virtio_bus_set_host_notifier(VirtioBusState *bus, int n, bool assign);
+/* Tell the bus that the ioeventfd handler is no longer required. */
+void virtio_bus_cleanup_host_notifier(VirtioBusState *bus, int n);
 
 #endif /* VIRTIO_BUS_H */
