@@ -42,8 +42,8 @@ static inline void gen_tb_start(TranslationBlock *tb)
     tcg_ctx->exitreq_label = gen_new_label();
     flag = tcg_temp_new_i32();
     tcg_gen_ld_i32(flag, cpu_env,
-                   offsetof(CPUState, tcg_exit_req) - ENV_OFFSET);
-    tcg_gen_brcondi_i32(TCG_COND_NE, flag, 0, exitreq_label);
+                   offsetof(CPUState, tcg_exit_req) - offsetof(ArchCPU, env));
+    tcg_gen_brcondi_i32(TCG_COND_NE, flag, 0, tcg_ctx->exitreq_label);
     tcg_temp_free_i32(flag);
 
     if (!(tb_cflags(tb) & CF_USE_ICOUNT)) {
@@ -53,7 +53,7 @@ static inline void gen_tb_start(TranslationBlock *tb)
     icount_label = gen_new_label();
     count = tcg_temp_local_new_i32();
     tcg_gen_ld_i32(count, cpu_env,
-                   offsetof(ArchCPU, neg.icount_decr_ptr->u32) -
+                   offsetof(ArchCPU, neg.icount_decr.u32) -
                    offsetof(ArchCPU, env));
 
 
@@ -72,7 +72,7 @@ static inline void gen_tb_start(TranslationBlock *tb)
 
     tcg_gen_brcondi_i32(TCG_COND_LT, count, 0, icount_label);
     tcg_gen_st16_i32(count, cpu_env,
-                         offsetof(ArchCPU, neg.icount_decr_ptr->u16.low) -
+                         offsetof(ArchCPU, neg.icount_decr.u16.low) -
                          offsetof(ArchCPU, env));
         gen_io_end();
 
@@ -81,15 +81,15 @@ static inline void gen_tb_start(TranslationBlock *tb)
 
 static inline void gen_tb_end(TranslationBlock *tb, int num_insns)
 {
-    gen_set_label(exitreq_label);
-    tcg_gen_exit_tb((uintptr_t)tb + TB_EXIT_REQUESTED);
+    gen_set_label(tcg_ctx->exitreq_label);
+    tcg_gen_exit_tb(tb, TB_EXIT_REQUESTED);
 
     if (tb_cflags(tb) & CF_USE_ICOUNT) {
         /* Update the num_insn immediate parameter now that we know
          * the actual insn count.  */
         tcg_set_insn_param(icount_start_insn, 1, num_insns);
         gen_set_label(icount_label);
-        tcg_gen_exit_tb((uintptr_t)tb + TB_EXIT_ICOUNT_EXPIRED);
+        tcg_gen_exit_tb(tb, TB_EXIT_ICOUNT_EXPIRED);
     }
 
 
@@ -104,9 +104,9 @@ static inline void gen_op_update_rr_icount(void)
 
     count = tcg_temp_new_i64();
 
-    tcg_gen_ld_i64(count, cpu_env, -ENV_OFFSET + offsetof(CPUState, rr_guest_instr_count));
+    tcg_gen_ld_i64(count, cpu_env, -offsetof(ArchCPU, env) + offsetof(CPUState, rr_guest_instr_count));
     tcg_gen_addi_i64(count, count, 1);
-    tcg_gen_st_i64(count, cpu_env, -ENV_OFFSET + offsetof(CPUState, rr_guest_instr_count));
+    tcg_gen_st_i64(count, cpu_env, -offsetof(ArchCPU, env) + offsetof(CPUState, rr_guest_instr_count));
 
     tcg_temp_free_i64(count);
 }
@@ -114,7 +114,7 @@ static inline void gen_op_update_rr_icount(void)
 static inline void gen_op_update_panda_pc(uint64_t new_pc)
 {
     TCGv_i64 tmp_pc = tcg_const_i64(new_pc);
-    tcg_gen_st_i64(tmp_pc, cpu_env, -ENV_OFFSET + offsetof(CPUState, panda_guest_pc));
+    tcg_gen_st_i64(tmp_pc, cpu_env, -offsetof(ArchCPU, env) + offsetof(CPUState, panda_guest_pc));
     tcg_temp_free_i64(tmp_pc);
 }
 

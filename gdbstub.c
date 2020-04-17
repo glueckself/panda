@@ -2491,7 +2491,7 @@ static void gdb_handle_reverse(GDBState *s, const char *p) {
 		// Reverse step
 		int res = gdb_rr_breakpoint_insert(cur_instr_count-1, GDB_BREAKPOINT_SW);
 		if (res < 0) {
-			put_packet(s, "E22");
+			put_packet("E22");
 			return;
 		}
 		s->c_cpu->reverse_flags = GDB_RSTEP;
@@ -2513,12 +2513,12 @@ static void gdb_handle_reverse(GDBState *s, const char *p) {
 	tb_flush(s->c_cpu);
 	tlb_flush(s->c_cpu);
 	panda_restore_by_num(closest_num);
-	gdb_continue(s);
+	gdb_continue();
 }
 
 static void gdb_handle_panda_cmd(GdbCmdContext *gdb_ctx, void *user_ctx) {
     //TODO: panda: describe arguments using ctx and let the common code parse it.
-    GDBState *s = gdbserver_state;
+    GDBState *s = &gdbserver_state;
     const char* p = gdbserver_state.line_buf + 10;
     char buf[MAX_PACKET_LENGTH] = {0};
 	char membuf[MAX_PACKET_LENGTH] = {0};
@@ -2528,7 +2528,7 @@ static void gdb_handle_panda_cmd(GdbCmdContext *gdb_ctx, void *user_ctx) {
         snprintf(membuf, sizeof(membuf), "%lu", rr_get_guest_instr_count());
 		
 		memtohex(buf, (uint8_t*)membuf, strlen(membuf));
-        put_packet(s, buf);
+        put_packet(buf);
     } else if (!strncmp(p, "rrbreakpoint", 12)) {
         p+=12;
         int membufsize = 0;
@@ -2547,7 +2547,7 @@ static void gdb_handle_panda_cmd(GdbCmdContext *gdb_ctx, void *user_ctx) {
 			membufsize = MAX_PACKET_LENGTH/2;
         
 		memtohex(buf, (uint8_t*)membuf, membufsize);
-        put_packet(s, buf);
+        put_packet(buf);
     } else if (!strncmp(p, "rrdelete", 8)) {
 		// delete rr instr breakpoint
 		p += 8;
@@ -2568,7 +2568,7 @@ static void gdb_handle_panda_cmd(GdbCmdContext *gdb_ctx, void *user_ctx) {
 			membufsize = MAX_PACKET_LENGTH/2;
         
 		memtohex(buf, (uint8_t*)membuf, membufsize);
-        put_packet(s, buf);
+        put_packet(buf);
 	} else if (!strncmp(p, "rrlist", 6)) {
 		CPUBreakpoint *bp;
         int membufsize = 0;
@@ -2587,7 +2587,7 @@ static void gdb_handle_panda_cmd(GdbCmdContext *gdb_ctx, void *user_ctx) {
 			membufsize = MAX_PACKET_LENGTH/2;
         
 		memtohex(buf, (uint8_t*)membuf, membufsize);
-        put_packet(s, buf);
+        put_packet(buf);
 	}
 }
 
@@ -2603,8 +2603,8 @@ static int gdb_handle_packet(const char *line_buf)
         break;
     case 'b':
         //TODO: panda: ugly hack. rewrite gdb_handle_reverse() to new interface
-        gdb_handle_reverse(gdbserver_state, line_buf+1);
-		put_packet(s, "OK");
+        gdb_handle_reverse(&gdbserver_state, line_buf+1);
+		put_packet("OK");
         return RS_IDLE;
     case '?':
         {

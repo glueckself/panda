@@ -14,7 +14,7 @@ ALL_PLUGIN_SUBDIRS=$(addprefix $(SRC_PATH)/panda/plugins/,$(PANDA_PLUGINS))
 ifdef EXTRA_PLUGINS_PATH
 $(call set-vpath, $(SRC_PATH):$(BUILD_DIR):$(EXTRA_PLUGINS_PATH))
 	EXTRA_PANDA_PLUGINS=$(shell tr -d "[:blank:]" < $(EXTRA_PLUGINS_PATH)/panda/plugins/config.panda | grep -v "^\#" | xargs)
-	EXTRA_PLUGIN_SUBDIR_RULES=$(patsubst %,extra-plugin-%, $(EXTRA_PANDA_PLUGINS))
+	EXTRA_PLUGIN_SUBDIR_RULES=$(patsubst %,panda-extra-plugin-%, $(EXTRA_PANDA_PLUGINS))
 	ALL_PLUGIN_SUBDIRS+=$(addprefix $(EXTRA_PLUGINS_PATH)/panda/plugins/,$(EXTRA_PANDA_PLUGINS))
 endif
 
@@ -27,7 +27,7 @@ ifdef CONFIG_SOFTMMU
 PLOG_READER_PROG=plog_reader
 endif
 
-PLUGIN_SUBDIR_RULES=$(patsubst %,plugin-%, $(PANDA_PLUGINS))
+PLUGIN_SUBDIR_RULES=$(patsubst %,panda-plugin-%, $(PANDA_PLUGINS))
 PLUGIN_SUBDIR_MAKEFLAGS=$(if $(V),,--no-print-directory) BUILD_DIR=$(BUILD_DIR)
 
 PANDA_API_INT_POSSIBLE=$(foreach plugin,$(PANDA_PLUGINS),panda/plugins/$(plugin)/$(plugin)_int.h)
@@ -38,7 +38,7 @@ PANDA_API_INT=$(foreach header,$(PANDA_API_INT_POSSIBLE),\
 
 PANDA_API_EXT=$(patsubst %_int.h,%_ext.h,$(PANDA_API_INT))
 
-plugin-%: plog.pb-c.h plog.pb.h $(PANDA_API_EXT)
+panda-plugin-%: plog.pb-c.h plog.pb.h $(PANDA_API_EXT)
 	$(call quiet-command,mkdir -p ../panda/plugins/$*,)
 	$(call quiet-command,mkdir -p panda/plugins/$*,)
 	$(call quiet-command,$(MAKE) $(PLUGIN_SUBDIR_MAKEFLAGS) \
@@ -47,7 +47,7 @@ plugin-%: plog.pb-c.h plog.pb.h $(PANDA_API_EXT)
 		PLUGIN_SRC_ROOT="$(SRC_PATH)/panda/plugins" \
 		V="$(V)" PLUGIN_NAME="$*" all,)
 
-extra-plugin-%: plog.pb-c.h plog.pb.h $(PANDA_API_EXT)
+panda-extra-plugin-%: plog.pb-c.h plog.pb.h $(PANDA_API_EXT)
 	$(call quiet-command,mkdir -p ../panda/plugins/$*,)
 	$(call quiet-command,mkdir -p panda/plugins/$*,)
 	$(call quiet-command,$(MAKE) $(PLUGIN_SUBDIR_MAKEFLAGS) \

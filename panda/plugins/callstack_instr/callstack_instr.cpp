@@ -157,7 +157,7 @@ static stackid get_stackid(CPUArchState* env) {
     if (in_kernelspace(env))
         asid = 0;
     else
-        asid = panda_current_asid(ENV_GET_CPU(env));
+        asid = panda_current_asid(env_cpu(env));
 
     // Invalidate cached stack pointer on ASID change
     if (cached_asid == 0 || cached_asid != asid) {
@@ -196,13 +196,13 @@ static stackid get_stackid(CPUArchState* env) {
         }
     }
 #else
-    return panda_current_asid(ENV_GET_CPU(env));
+    return panda_current_asid(env_cpu(env));
 #endif
 }
 
 instr_type disas_block(CPUArchState* env, target_ulong pc, int size) {
     unsigned char *buf = (unsigned char *) malloc(size);
-    int err = panda_virtual_memory_rw(ENV_GET_CPU(env), pc, buf, size, 0);
+    int err = panda_virtual_memory_rw(env_cpu(env), pc, buf, size, 0);
     if (err == -1) printf("Couldn't read TB memory!\n");
     instr_type res = INSTR_UNKNOWN;
 
@@ -425,7 +425,7 @@ void get_prog_point(CPUState* cpu, prog_point *p) {
     if (!p) return;
 
     // Get address space identifier
-    target_ulong asid = panda_current_asid(ENV_GET_CPU(env));
+    target_ulong asid = panda_current_asid(env_cpu(env));
     // Lump all kernel-mode CR3s together
 
     if(!in_kernelspace(env))

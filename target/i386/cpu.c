@@ -5417,15 +5417,6 @@ out:
 }
 #endif  /* !CONFIG_USER_ONLY */
 
-static gchar *x86_gdb_arch_name(CPUState *cs)
-{
-#ifdef TARGET_X86_64
-    return g_strdup("i386:x86-64");
-#else
-    return g_strdup("i386");
-#endif
-}
-
 static void x86_cpu_cpudef_class_init(ObjectClass *oc, void *data)
 {
     X86CPUModel *model = data;

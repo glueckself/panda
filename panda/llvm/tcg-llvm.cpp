@@ -367,34 +367,34 @@ TCGLLVMContextPrivate::~TCGLLVMContextPrivate()
 }
 
 void TCGLLVMContextPrivate::initMemoryHelpers() {
-    qemu_ld_helpers[MO_UB] = (void *)helper_ret_ldub_mmu_panda;
-    qemu_ld_helpers[MO_LEUW] = (void *)helper_le_lduw_mmu_panda;
-    qemu_ld_helpers[MO_LEUL] = (void *)helper_le_ldul_mmu_panda;
-    qemu_ld_helpers[MO_LEQ] = (void *)helper_le_ldq_mmu_panda;
-    qemu_ld_helpers[MO_BEUW] = (void *)helper_be_lduw_mmu_panda;
-    qemu_ld_helpers[MO_BEUL] = (void *)helper_be_ldul_mmu_panda;
-    qemu_ld_helpers[MO_BEQ] = (void *)helper_be_ldq_mmu_panda;
-    qemu_ld_helper_names[MO_UB] = "helper_ret_ldub_mmu_panda";
-    qemu_ld_helper_names[MO_LEUW] = "helper_le_lduw_mmu_panda";
-    qemu_ld_helper_names[MO_LEUL] = "helper_le_ldul_mmu_panda";
-    qemu_ld_helper_names[MO_LEQ] = "helper_le_ldq_mmu_panda";
-    qemu_ld_helper_names[MO_BEUW] = "helper_be_lduw_mmu_panda";
-    qemu_ld_helper_names[MO_BEUL] = "helper_be_ldul_mmu_panda";
-    qemu_ld_helper_names[MO_BEQ] = "helper_be_ldq_mmu_panda";
-    qemu_st_helpers[MO_UB] = (void *)helper_ret_stb_mmu_panda;
-    qemu_st_helpers[MO_LEUW] = (void *)helper_le_stw_mmu_panda;
-    qemu_st_helpers[MO_LEUL] = (void *)helper_le_stl_mmu_panda;
-    qemu_st_helpers[MO_LEQ] = (void *)helper_le_stq_mmu_panda;
-    qemu_st_helpers[MO_BEUW] = (void *)helper_be_stw_mmu_panda;
-    qemu_st_helpers[MO_BEUL] = (void *)helper_be_stl_mmu_panda;
-    qemu_st_helpers[MO_BEQ] = (void *)helper_be_stq_mmu_panda;
-    qemu_st_helper_names[MO_UB] = "helper_ret_stb_mmu_panda";
-    qemu_st_helper_names[MO_LEUW] = "helper_le_stw_mmu_panda";
-    qemu_st_helper_names[MO_LEUL] = "helper_le_stl_mmu_panda";
-    qemu_st_helper_names[MO_LEQ] = "helper_le_stq_mmu_panda";
-    qemu_st_helper_names[MO_BEUW] = "helper_be_stw_mmu_panda";
-    qemu_st_helper_names[MO_BEUL] = "helper_be_stl_mmu_panda";
-    qemu_st_helper_names[MO_BEQ] = "helper_be_stq_mmu_panda";
+    qemu_ld_helpers[MO_UB] = (void *)helper_ret_ldub_mmu;
+    qemu_ld_helpers[MO_LEUW] = (void *)helper_le_lduw_mmu;
+    qemu_ld_helpers[MO_LEUL] = (void *)helper_le_ldul_mmu;
+    qemu_ld_helpers[MO_LEQ] = (void *)helper_le_ldq_mmu;
+    qemu_ld_helpers[MO_BEUW] = (void *)helper_be_lduw_mmu;
+    qemu_ld_helpers[MO_BEUL] = (void *)helper_be_ldul_mmu;
+    qemu_ld_helpers[MO_BEQ] = (void *)helper_be_ldq_mmu;
+    qemu_ld_helper_names[MO_UB] = "helper_ret_ldub_mmu";
+    qemu_ld_helper_names[MO_LEUW] = "helper_le_lduw_mmu";
+    qemu_ld_helper_names[MO_LEUL] = "helper_le_ldul_mmu";
+    qemu_ld_helper_names[MO_LEQ] = "helper_le_ldq_mmu";
+    qemu_ld_helper_names[MO_BEUW] = "helper_be_lduw_mmu";
+    qemu_ld_helper_names[MO_BEUL] = "helper_be_ldul_mmu";
+    qemu_ld_helper_names[MO_BEQ] = "helper_be_ldq_mmu";
+    qemu_st_helpers[MO_UB] = (void *)helper_ret_stb_mmu;
+    qemu_st_helpers[MO_LEUW] = (void *)helper_le_stw_mmu;
+    qemu_st_helpers[MO_LEUL] = (void *)helper_le_stl_mmu;
+    qemu_st_helpers[MO_LEQ] = (void *)helper_le_stq_mmu;
+    qemu_st_helpers[MO_BEUW] = (void *)helper_be_stw_mmu;
+    qemu_st_helpers[MO_BEUL] = (void *)helper_be_stl_mmu;
+    qemu_st_helpers[MO_BEQ] = (void *)helper_be_stq_mmu;
+    qemu_st_helper_names[MO_UB] = "helper_ret_stb_mmu";
+    qemu_st_helper_names[MO_LEUW] = "helper_le_stw_mmu";
+    qemu_st_helper_names[MO_LEUL] = "helper_le_stl_mmu";
+    qemu_st_helper_names[MO_LEQ] = "helper_le_stq_mmu";
+    qemu_st_helper_names[MO_BEUW] = "helper_be_stw_mmu";
+    qemu_st_helper_names[MO_BEUL] = "helper_be_stl_mmu";
+    qemu_st_helper_names[MO_BEQ] = "helper_be_stq_mmu";
 }
 
 Value* TCGLLVMContextPrivate::getPtrForValue(int idx)
@@ -671,7 +671,7 @@ inline Value* TCGLLVMContextPrivate::generateQemuMemOp(bool ld,
 #endif
 
 #ifdef CONFIG_SOFTMMU
-    TCGMemOp opc = get_memop(flags);
+    TCGMemOpIdx opc = get_memop(flags);
     int memIdx = opc & (MO_BSWAP | MO_SIZE);
     uintptr_t helperFuncAddr;
 
@@ -778,8 +778,8 @@ int TCGLLVMContextPrivate::generateOperation(int opc, const TCGOp *op,
 
     case INDEX_op_call:
         {
-            int nb_oargs = op->callo;
-            int nb_iargs = op->calli;
+            int nb_oargs = TCGOP_CALLO(op);
+            int nb_iargs = TCGOP_CALLI(op);
             nb_args = nb_oargs + nb_iargs + def.nb_cargs + 1;
 
             std::vector<Value*> argValues;
@@ -1279,7 +1279,7 @@ int TCGLLVMContextPrivate::generateOperation(int opc, const TCGOp *op,
 // retaddr is set to 0xDEADBEEF for now...see note in softmmu_template.h
 #define __OP_QEMU_ST(opc_name)                                      \
     case opc_name: {                                                \
-        TCGMemOp op = get_memop(args[2]);                           \
+        TCGMemOpIdx op = get_memop(args[2]);                        \
         bool signE = op & MO_SIGN;                                  \
         int bits = (1 << (op & MO_SIZE)) * 8;                       \
         unsigned memIndex = get_mmuidx(args[2]);                    \
@@ -1291,7 +1291,7 @@ int TCGLLVMContextPrivate::generateOperation(int opc, const TCGOp *op,
 
 #define __OP_QEMU_LD(opc_name)                                      \
     case opc_name: {                                                \
-        TCGMemOp op = get_memop(args[2]);                           \
+        TCGMemOpIdx op = get_memop(args[2]);                        \
         bool signE = op & MO_SIGN;                                  \
         int bits = (1 << (op & MO_SIZE)) * 8;                       \
         unsigned memIndex = get_mmuidx(args[2]);                    \
@@ -1500,11 +1500,9 @@ void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
 
     /* Generate code for each opc */
     const TCGArg *args;
-    TCGOp *op;
-    for(int opc_index = s->gen_op_buf[0].next; opc_index != 0;
-            opc_index = op->next) {
-        op = &s->gen_op_buf[opc_index];
-        args = &s->gen_opparam_buf[op->args];
+    //TODO: panda: do I have to iterate manually or is there a traversing function?
+    for(TCGOp *op = s->ops.tqh_first; op != NULL; op = op->link.tqe_next) {
+        args = op->args;
         int opc = op->opc;
 
         if (opc == INDEX_op_insn_start) {

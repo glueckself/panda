@@ -36,6 +36,7 @@
 #include "qemu/qemu-print.h"
 #include "qemu/timer.h"
 
+
 /* Note: the long term plan is to reduce the dependencies on the QEMU
    CPU definitions. Currently they are used for qemu_ld/st
    instructions */
@@ -64,6 +65,8 @@
 #include "elf.h"
 #include "exec/log.h"
 #include "sysemu/sysemu.h"
+
+#include "panda/tcg-llvm.h"
 
 /* Forward declarations for functions declared in tcg-target.inc.c and
    used here. */
@@ -430,9 +433,31 @@ void tcg_tb_remove(TranslationBlock *tb)
 {
     struct tcg_region_tree *rt = tc_ptr_to_region_tree(tb->tc.ptr);
 
+#if defined(CONFIG_LLVM)
+    tcg_llvm_tb_free(tb);
+#endif
     qemu_mutex_lock(&rt->lock);
     g_tree_remove(rt->tree, &tb->tc);
     qemu_mutex_unlock(&rt->lock);
+}
+
+typedef struct {
+	uintptr_t tc_ptr;
+	TranslationBlock *tb;
+} llvm_lookup_res_t;
+
+static gboolean tcg_lookup_llvm(gpointer key, gpointer value, gpointer data) {
+    const TranslationBlock *tb = (TranslationBlock*)value;
+    llvm_lookup_res_t *res = (llvm_lookup_res_t*)data;
+
+    if (tb->llvm_function
+           && res->tc_ptr >= (uintptr_t)tb->llvm_tc_ptr
+           && res->tc_ptr <  (uintptr_t)tb->llvm_tc_end) {
+	res->tb=tb;
+        return 1;
+    }
+
+    return 0;
 }
 
 /*
@@ -445,6 +470,25 @@ TranslationBlock *tcg_tb_lookup(uintptr_t tc_ptr)
     struct tcg_region_tree *rt = tc_ptr_to_region_tree((void *)tc_ptr);
     TranslationBlock *tb;
     struct tb_tc s = { .ptr = (void *)tc_ptr };
+
+    //TODO: panda: not sure if this is right or if we need to check llvm stuff in tc_ptr_to_region_tree
+#ifdef CONFIG_LLVM
+    if (execute_llvm) {
+        /* first check last tb. optimization for coming from generated code. */
+        tb = tcg_llvm_runtime.last_tb;
+        if (tb && tb->llvm_function
+                && tc_ptr >= (uintptr_t)tb->llvm_tc_ptr
+                && tc_ptr <  (uintptr_t)tb->llvm_tc_end) {
+            return tb;
+        }
+	llvm_lookup_res_t res;
+	res.tc_ptr = tc_ptr;
+	res.tb = NULL;
+        /* then do linear search. */
+	tcg_tb_foreach(tcg_lookup_llvm, &res);
+	return res.tb;
+    }
+#endif
 
     qemu_mutex_lock(&rt->lock);
     tb = g_tree_lookup(rt->tree, &s);

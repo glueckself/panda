@@ -13,30 +13,46 @@
 
 #ifdef TARGET_ARM
 /* Return the exception level which controls this address translation regime */
-static inline uint32_t regime_el(CPUARMState *env, ARMMMUIdx mmu_idx)
+/* Return the exception level which controls this address translation regime */
+static uint32_t regime_el(CPUARMState *env, ARMMMUIdx mmu_idx)
 {
     switch (mmu_idx) {
-    case ARMMMUIdx_S2NS:
-    case ARMMMUIdx_S1E2:
-        return 2;
-    case ARMMMUIdx_S1E3:
-        return 3;
-    case ARMMMUIdx_S1SE0:
-        return arm_el_is_aa64(env, 3) ? 1 : 3;
-    case ARMMMUIdx_S1SE1:
-    case ARMMMUIdx_S1NSE0:
-    case ARMMMUIdx_S1NSE1:
-    case ARMMMUIdx_S12NSE1:
-        return 1;
-    default:
-        g_assert_not_reached();
+        case ARMMMUIdx_E20_0:
+        case ARMMMUIdx_E20_2:
+        case ARMMMUIdx_E20_2_PAN:
+        case ARMMMUIdx_Stage2:
+        case ARMMMUIdx_E2:
+            return 2;
+        case ARMMMUIdx_SE3:
+            return 3;
+        case ARMMMUIdx_SE10_0:
+            return arm_el_is_aa64(env, 3) ? 1 : 3;
+        case ARMMMUIdx_SE10_1:
+        case ARMMMUIdx_SE10_1_PAN:
+        case ARMMMUIdx_Stage1_E0:
+        case ARMMMUIdx_Stage1_E1:
+        case ARMMMUIdx_Stage1_E1_PAN:
+        case ARMMMUIdx_E10_0:
+        case ARMMMUIdx_E10_1:
+        case ARMMMUIdx_E10_1_PAN:
+        case ARMMMUIdx_MPrivNegPri:
+        case ARMMMUIdx_MUserNegPri:
+        case ARMMMUIdx_MPriv:
+        case ARMMMUIdx_MUser:
+        case ARMMMUIdx_MSPrivNegPri:
+        case ARMMMUIdx_MSUserNegPri:
+        case ARMMMUIdx_MSPriv:
+        case ARMMMUIdx_MSUser:
+            return 1;
+        default:
+            g_assert_not_reached();
     }
 }
 
 /* Return the TCR controlling this translation regime */
 static inline TCR *regime_tcr(CPUARMState *env, ARMMMUIdx mmu_idx)
 {
-    if (mmu_idx == ARMMMUIdx_S2NS) {
+    if (mmu_idx == ARMMMUIdx_Stage2) {
         return &env->cp15.vtcr_el2;
     }
     return &env->cp15.tcr_el[regime_el(env, mmu_idx)];
@@ -46,7 +62,7 @@ static inline TCR *regime_tcr(CPUARMState *env, ARMMMUIdx mmu_idx)
 static inline uint64_t regime_ttbr(CPUARMState *env, ARMMMUIdx mmu_idx,
                                    int ttbrn)
 {
-    if (mmu_idx == ARMMMUIdx_S2NS) {
+    if (mmu_idx == ARMMMUIdx_Stage2) {
         return env->cp15.vttbr_el2;
     }
     if (ttbrn == 0) {

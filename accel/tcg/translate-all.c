@@ -365,7 +365,7 @@ static int cpu_restore_state_from_tb(CPUState *cpu, TranslationBlock *tb,
 
     searched_pc -= GETPC_ADJ;
 
-    panda_callbacks_cpu_restore_state(ENV_GET_CPU(env), tb);
+    panda_callbacks_cpu_restore_state(env_cpu(env), tb);
 
 #if defined(CONFIG_LLVM)
     target_ulong guest_pc = cpu->panda_guest_pc;
@@ -1207,13 +1207,6 @@ void tcg_exec_init(unsigned long tb_size)
 #endif
 }
 
-/* call with @p->lock held */
-#ifdef CONFIG_LLVM
-    tcg_llvm_tb_alloc(tb);
-#endif
-#if defined(CONFIG_LLVM)
-        tcg_llvm_tb_free(tb);
-#endif
 static inline void invalidate_page_bitmap(PageDesc *p)
 {
     assert_page_locked(p);
@@ -1268,6 +1261,14 @@ static gboolean tb_host_size_iter(gpointer key, gpointer value, gpointer data)
     return false;
 }
 
+//TODO: panda: maybe move this down to panda/?
+static gboolean tb_llvm_free_iter(gpointer key, gpointer value, gpointer data)
+{
+    TranslationBlock *tb = value;
+    tcg_llvm_tb_free(tb);
+    return 0;
+}
+
 /* flush all the translation blocks */
 static void do_tb_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
 {
@@ -1292,10 +1293,7 @@ static void do_tb_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
     }
 
 #if defined(CONFIG_LLVM)
-    int i2;
-    for(i2 = 0; i2 < tcg_ctx.tb_ctx.nb_tbs; ++i2){
-        tcg_llvm_tb_free(&tcg_ctx.tb_ctx.tbs[i2]);
-    }
+    tcg_tb_foreach(tb_llvm_free_iter, NULL);
 #endif
 
     CPU_FOREACH(cpu) {
@@ -1787,6 +1785,9 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     tb->orig_tb = NULL;
     tb->trace_vcpu_dstate = *cpu->trace_dstate;
     tcg_ctx->tb_cflags = cflags;
+#ifdef CONFIG_LLVM
+    tcg_llvm_tb_alloc(tb);
+#endif
  tb_overflow:
 
 #ifdef CONFIG_PROFILER
@@ -1825,7 +1826,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
 
 #if defined(CONFIG_LLVM)
     if (generate_llvm)
-        tcg_llvm_gen_code(tcg_llvm_ctx, &tcg_ctx, tb);
+        tcg_llvm_gen_code(tcg_llvm_ctx, tcg_ctx, tb);
 #endif
 
     if (unlikely(gen_code_size < 0)) {
@@ -2251,32 +2252,9 @@ static bool tb_invalidate_phys_page(tb_page_addr_t addr, uintptr_t pc)
 /* user-mode: call with mmap_lock held */
 void tb_check_watchpoint(CPUState *cpu, uintptr_t retaddr)
 {
-    TranslationBlock *tb;
+    TranslationBlock *tb = NULL;
 
     assert_memory_lock();
-
-#ifdef CONFIG_LLVM
-    if (execute_llvm) {
-        /* first check last tb. optimization for coming from generated code. */
-        tb = tcg_llvm_runtime.last_tb;
-        if (tb && tb->llvm_function
-                && tc_ptr >= (uintptr_t)tb->llvm_tc_ptr
-                && tc_ptr <  (uintptr_t)tb->llvm_tc_end) {
-            return tb;
-        }
-        /* then do linear search. */
-        for (m = 0; m < tcg_ctx.tb_ctx.nb_tbs; m++) {
-            tb = &tcg_ctx.tb_ctx.tbs[m];
-            if (tb->llvm_function
-                    && tc_ptr >= (uintptr_t)tb->llvm_tc_ptr
-                    && tc_ptr <  (uintptr_t)tb->llvm_tc_end) {
-                return tb;
-            }
-        }
-        return NULL;
-    }
-#endif
-
 
     tb = tcg_tb_lookup(retaddr);
     if (tb) {

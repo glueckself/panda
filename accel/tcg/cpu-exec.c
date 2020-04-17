@@ -457,9 +457,9 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
     tb = tb_lookup__cpu_state(cpu, &pc, &cs_base, &flags, cf_mask);
     if (tb == NULL) {
         mmap_lock();
+        panda_callbacks_before_block_translate(cpu, pc);
         tb = tb_gen_code(cpu, pc, cs_base, flags, cf_mask);
-                panda_callbacks_before_block_translate(cpu, pc);
-                panda_callbacks_after_block_translate(cpu, tb);
+        panda_callbacks_after_block_translate(cpu, tb);
         mmap_unlock();
         /* We add the TB in the virtual pc hash table for the fast lookup */
         atomic_set(&cpu->tb_jmp_cache[tb_jmp_cache_hash_func(pc)], tb);
@@ -891,9 +891,9 @@ int cpu_exec(CPUState *cpu)
                         && tb->icount > until_interrupt)) {
                 /* Retranslate so that basic block boundary matches
                  * record & replay for interrupt delivery. */
-                tb_lock();
+                mmap_lock();
                 tb_phys_invalidate(tb, -1);
-                tb_unlock();
+                mmap_unlock();
                 continue;
             }
 #endif // CONFIG_SOFTMMU

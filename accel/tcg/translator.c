@@ -119,22 +119,22 @@ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
         //mz let's count this instruction
         // In LLVM mode we generate this more efficiently.
         if ((rr_mode != RR_OFF || panda_update_pc) && !generate_llvm) {
-            gen_op_update_panda_pc(dc->pc);
+            gen_op_update_panda_pc(db->pc_next);
             gen_op_update_rr_icount();
         }
 #endif
 
         // PANDA: ask if anyone wants execution notification
-        if (unlikely(panda_callbacks_insn_translate(cs, dc->pc))) {
+        if (unlikely(panda_callbacks_insn_translate(cpu, db->pc_next))) {
             // PANDA: Insert the instrumentation
-            gen_helper_panda_insn_exec(tcg_const_tl(dc->pc));
+            gen_helper_panda_insn_exec(tcg_const_tl(db->pc_next));
         }
 
         ops->translate_insn(db, cpu);
 
-        if (unlikely(panda_callbacks_after_insn_translate(cs, dc->pc))
-                && !dc->is_jmp) {
-            gen_helper_panda_after_insn_exec(tcg_const_tl(dc->pc));
+        if (unlikely(panda_callbacks_after_insn_translate(cpu, db->pc_next))
+                && !db->is_jmp) {
+            gen_helper_panda_after_insn_exec(tcg_const_tl(db->pc_next));
         }
 
         /* Stop translation if translate_insn so indicated.  */

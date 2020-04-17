@@ -1186,6 +1186,19 @@ static void qemu_wait_io_event_common(CPUState *cpu)
     process_queued_cpu_work(cpu);
 }
 
+static void handle_icount_deadline(void)
+{
+    if (use_icount) {
+        int64_t deadline = qemu_clock_deadline_ns_all(QEMU_CLOCK_VIRTUAL,
+                                                      QEMU_TIMER_ATTR_ALL);
+
+        if (deadline == 0) {
+            /* Wake up other AioContexts.  */
+            qemu_clock_notify(QEMU_CLOCK_VIRTUAL);
+        }
+    }
+}
+
 //TODO: panda: not sure if this is the right function, in panda it was qemu_tcg_wait_io_event()
 static void qemu_tcg_rr_wait_io_event(void)
 {
@@ -1360,19 +1373,6 @@ static int64_t tcg_get_icount_limit(void)
     }
 }
 
-static void handle_icount_deadline(void)
-{
-    if (use_icount) {
-        int64_t deadline = qemu_clock_deadline_ns_all(QEMU_CLOCK_VIRTUAL,
-                                                      QEMU_TIMER_ATTR_ALL);
-
-        if (deadline == 0) {
-            /* Wake up other AioContexts.  */
-            qemu_clock_notify(QEMU_CLOCK_VIRTUAL);
-        }
-    }
-}
-
 //TODO: panda: panda removes the following functions. i'll keep them for smaller diffs
 static void prepare_icount_for_run(CPUState *cpu)
 {
@@ -1538,7 +1538,7 @@ static void *qemu_tcg_rr_cpu_thread_fn(void *arg)
         while (cpu && !cpu->queued_work_first && !cpu->exit_request) {
 
             atomic_mb_set(&tcg_current_rr_cpu, cpu);
-            
+            current_cpu = cpu;
             qemu_clock_enable(QEMU_CLOCK_VIRTUAL,
                               (cpu->singlestep_enabled & SSTEP_NOTIMER) == 0);
 
@@ -1546,9 +1546,9 @@ static void *qemu_tcg_rr_cpu_thread_fn(void *arg)
                 int r;
 
                 qemu_mutex_unlock_iothread();
-                
+                prepare_icount_for_run(cpu);
                 r = tcg_cpu_exec(cpu);
-
+                process_icount_data(cpu);
                 qemu_mutex_lock_iothread();
 
                 if (r == EXCP_DEBUG) {
@@ -1880,7 +1880,7 @@ void qemu_mutex_lock_iothread_impl(const char *file, int line)
         atomic_dec(&iothread_requesting_mutex);
     } else {
         if (qemu_mutex_trylock(&qemu_global_mutex)) {
-            qemu_cpu_kick_rr_cpu();
+            qemu_cpu_kick_rr_cpus();
             bql_lock(&qemu_global_mutex, file, line);
         }
         atomic_dec(&iothread_requesting_mutex);

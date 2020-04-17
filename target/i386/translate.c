@@ -8533,7 +8533,7 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
     //mz for record and replay, let's start each block with EIP = pc_start.
     //mz this way, we can chain in record and not chain in replay.
     if (rr_mode != RR_OFF) {
-        gen_jmp_im(dc->base.tb->pc - dc->cs_base);
+        gen_jmp_im(dc, dc->base.tb->pc - dc->cs_base);
     }
 #endif
 }
@@ -8557,38 +8557,38 @@ static bool i386_tr_breakpoint_check(DisasContextBase *dcbase, CPUState *cpu,
     //TODO: panda: I think this is wrong here. It probably needs to go to some of the structs that are passed.
     // see git diff qemu-29 master -- target/i386/translate.c
     uint64_t rr_updated_instr_count = rr_get_guest_instr_count();
-    cpu_rcont_check_restore(dc->cs_base, rr_updated_instr_count);
+    cpu_rcont_check_restore(cpu, rr_updated_instr_count);
 
+    //TODO: panda: not sure if I got the flags right 
     /* If RF is set, suppress an internally generated breakpoint.  */
     int flags = dc->base.tb->flags & HF_RF_MASK ? BP_GDB : BP_ANY;
     if (bp->flags & flags ||
-        unlikely(cpu_rr_breakpoint_test(dc->cs_base, rr_updated_instr_count, 
-                                        tb->flags & HF_RF_MASK ? BP_GDB : BP_ANY))) {
+        unlikely(cpu_rr_breakpoint_test(cpu, rr_updated_instr_count, flags))) {
         // If we're in reverse direction, don't gen a debug event. 
         // Instead, record it so we can figure out the latest one
-        if (unlikely(dc->cs_base->reverse_flags & GDB_RCONT)) {
-            dc->cs_base->last_bp_hit_instr = rr_updated_instr_count;
-        } else if (dc->cs_base->reverse_flags & GDB_RSTEP) {
-            if (rr_updated_instr_count >= dc->cs_base->last_gdb_instr) {
+        if (unlikely(cpu->reverse_flags & GDB_RCONT)) {
+            cpu->last_bp_hit_instr = rr_updated_instr_count;
+        } else if (cpu->reverse_flags & GDB_RSTEP) {
+            if (rr_updated_instr_count >= cpu->last_gdb_instr) {
                 fprintf(stderr, "GDB_RSTEP went too far");
                 abort();
             }
 
-            if (rr_updated_instr_count == dc->cs_base->last_gdb_instr-1) {
-                dc->cs_base->reverse_flags |= GDB_RDONE;
+            if (rr_updated_instr_count == cpu->last_gdb_instr-1) {
+                cpu->reverse_flags |= GDB_RDONE;
                 goto generate_debug;
             }
 
-        } else if (dc->cs_base->reverse_flags & GDB_RCONT_BREAK) {
+        } else if (cpu->reverse_flags & GDB_RCONT_BREAK) {
             // We are doing second pass of reverse-continue
             // break on latest breakpoint/watchpoint 
-            if (rr_updated_instr_count > dc->cs_base->last_bp_hit_instr) {
+            if (rr_updated_instr_count > cpu->last_bp_hit_instr) {
                 fprintf(stderr, "GDB_RCONT_BREAK went too far");
                 abort();
             }
 
-            if  (rr_updated_instr_count == dc->cs_base->last_bp_hit_instr) {
-                dc->cs_base->reverse_flags = 0;
+            if  (rr_updated_instr_count == cpu->last_bp_hit_instr) {
+                cpu->reverse_flags = 0;
                 goto generate_debug;
             }
         } else {

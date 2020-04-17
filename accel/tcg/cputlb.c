@@ -19,6 +19,7 @@
 
 #include "qemu/osdep.h"
 #include "cpu.h"
+#include "qemu/main-loop.h"
 #include "exec/exec-all.h"
 #include "exec/memory.h"
 #include "exec/address-spaces.h"
@@ -42,6 +43,8 @@
 #include "panda/rr/rr_log_all.h"
 #include "panda/rr/rr_log.h"
 #include "panda/callback_support.h"
+
+extern bool panda_use_memcb;
 
 /* DEBUG defines, enable DEBUG_TLB_LOG to log to the CPU_LOG_MMU target */
 /* #define DEBUG_TLB */
@@ -1030,6 +1033,7 @@ static uint64_t io_readx(CPUArchState *env, CPUIOTLBEntry *iotlbentry,
     MemoryRegionSection *section;
     MemoryRegion *mr;
     uint64_t val;
+    bool locked = false;
     MemTxResult r;
 
     section = iotlb_to_section(cpu, iotlbentry->addr, iotlbentry->attrs);
@@ -1040,27 +1044,38 @@ static uint64_t io_readx(CPUArchState *env, CPUIOTLBEntry *iotlbentry,
         cpu_io_recompile(cpu, retaddr);
     }
 
+    if (mr->global_locking && !qemu_mutex_iothread_locked()) {
+        qemu_mutex_lock_iothread();
+        locked = true;
+    }
+    hwaddr physaddr = mr_offset +
+        section->offset_within_address_space -
+        section->offset_within_region;
+
+    //TODO: panda: not sure if we have to call cpu_transaction_failed when we do record/replay
     if (mr->name && !strcmp(mr->name, "watch")){
         r = memory_region_dispatch_read(mr, mr_offset, &val, op, iotlbentry->attrs);
-        if (r != MEMTX_OK) {
-            hwaddr physaddr = mr_offset +
-                section->offset_within_address_space -
-                section->offset_within_region;
+    } else {
+        RR_DO_RECORD_OR_REPLAY(
+            /* action= */
+            (r = memory_region_dispatch_read(mr, mr_offset, &val, op, iotlbentry->attrs)),
+            /* record= */ rr_input_8(&val),
+            /* replay= */ rr_input_8(&val),
+            /* location= */ RR_CALLSITE_IO_READ_ALL);
 
-            cpu_transaction_failed(cpu, physaddr, addr, memop_size(op), access_type,
-                                   mmu_idx, iotlbentry->attrs, r, retaddr);
-        }
-        return val;
+        panda_callbacks_after_mmio_read(cpu, physaddr, memop_size(op), val);
     }
 
-    RR_DO_RECORD_OR_REPLAY(
-        /* action= */
-        memory_region_dispatch_read(mr, physaddr, &val, size, iotlbentry->attrs),
-        /* record= */ rr_input_8(&val),
-        /* replay= */ rr_input_8(&val),
-        /* location= */ RR_CALLSITE_IO_READ_ALL);
+    if (r != MEMTX_OK) {
+        cpu_transaction_failed(cpu, physaddr, addr, memop_size(op), access_type,
+                                mmu_idx, iotlbentry->attrs, r, retaddr);
+    }
 
-    panda_callbacks_after_mmio_read(cpu, physaddr, size, val);
+    if (locked) {
+        qemu_mutex_unlock_iothread();
+    }
+
+    panda_callbacks_after_mmio_read(cpu, physaddr, memop_size(op), val);
 
     return val;
 }
@@ -1074,6 +1089,7 @@ static void io_writex(CPUArchState *env, CPUIOTLBEntry *iotlbentry,
     MemoryRegionSection *section;
     MemoryRegion *mr;
     MemTxResult r;
+    bool locked = false;
 
     section = iotlb_to_section(cpu, iotlbentry->addr, iotlbentry->attrs);
     mr = section->mr;
@@ -1084,43 +1100,36 @@ static void io_writex(CPUArchState *env, CPUIOTLBEntry *iotlbentry,
 
     cpu->mem_io_pc = retaddr;
 
-    if (mr->name && !strcmp(mr->name, "watch")){
-        r = memory_region_dispatch_write(mr, mr_offset, val, op, iotlbentry->attrs);
-        if (r != MEMTX_OK) {
-            hwaddr physaddr = mr_offset +
-                section->offset_within_address_space -
-                section->offset_within_region;
-
-            cpu_transaction_failed(cpu, physaddr, addr, memop_size(op),
-                                   MMU_DATA_STORE, mmu_idx, iotlbentry->attrs, r,
-                                   retaddr);
-            return;
-        }
+    if (mr->global_locking && !qemu_mutex_iothread_locked()) {
+        qemu_mutex_lock_iothread();
+        locked = true;
     }
-   
+    hwaddr physaddr = mr_offset +
+        section->offset_within_address_space -
+        section->offset_within_region;
 
-    if (mr != &io_mem_rom && mr != &io_mem_notdirty) {
+    if ((mr->name && !strcmp(mr->name, "watch")) || memory_region_is_romd(mr)){
+        r = memory_region_dispatch_write(mr, mr_offset, val, op, iotlbentry->attrs);
+
+    } else {
         RR_DO_RECORD_OR_REPLAY(
             /* action= */
-            memory_region_dispatch_write(mr, physaddr, val, size, iotlbentry->attrs),
+            (r = memory_region_dispatch_write(mr, mr_offset, val, op, iotlbentry->attrs)),
             /* record= */ RR_NO_ACTION,
             /* replay= */ RR_NO_ACTION,
             /* location= */ RR_CALLSITE_IO_WRITE_ALL);
-    } else {
-        r = memory_region_dispatch_write(mr, mr_offset, val, op, iotlbentry->attrs);
-        if (r != MEMTX_OK) {
-            hwaddr physaddr = mr_offset +
-                section->offset_within_address_space -
-                section->offset_within_region;
-
-            cpu_transaction_failed(cpu, physaddr, addr, memop_size(op),
-                                   MMU_DATA_STORE, mmu_idx, iotlbentry->attrs, r,
-                                   retaddr);
-        }
     }
+    if (r != MEMTX_OK) {
+        cpu_transaction_failed(cpu, physaddr, addr, memop_size(op),
+                                MMU_DATA_STORE, mmu_idx, iotlbentry->attrs, r,
+                                retaddr);
     }
 
-    panda_callbacks_after_mmio_write(cpu, physaddr, size, val);
+    if (locked) {
+        qemu_mutex_unlock_iothread();
+    }
+
+    panda_callbacks_after_mmio_write(cpu, physaddr, memop_size(op), val);
 }
 
 static inline target_ulong tlb_read_ofs(CPUTLBEntry *entry, size_t ofs)
@@ -1531,7 +1540,7 @@ load_memop(const void *haddr, MemOp op)
 }
 
 static inline uint64_t QEMU_ALWAYS_INLINE
-load_helper(CPUArchState *env, target_ulong addr, TCGMemOpIdx oi,
+load_helper_real(CPUArchState *env, target_ulong addr, TCGMemOpIdx oi,
             uintptr_t retaddr, MemOp op, bool code_read,
             FullLoadHelper *full_load)
 {
@@ -1633,6 +1642,40 @@ load_helper(CPUArchState *env, target_ulong addr, TCGMemOpIdx oi,
 
     haddr = (void *)((uintptr_t)addr + entry->addend);
     return load_memop(haddr, op);
+}
+
+static inline uint64_t QEMU_ALWAYS_INLINE
+load_helper(CPUArchState *env, target_ulong addr, TCGMemOpIdx oi,
+            uintptr_t retaddr, MemOp op, bool code_read,
+            FullLoadHelper *full_load) {
+    if(unlikely(panda_use_memcb)) {
+        unsigned mmu_idx = get_mmuidx(oi);
+        CPUTLBEntry *entry = tlb_entry(env, mmu_idx, addr);
+        target_ulong tlb_addr = code_read ? entry->addr_code : entry->addr_read;
+        CPUState *cpu = env_cpu(env);
+        uintptr_t haddr = 0;
+        uint64_t ret;
+
+        if ((addr & TARGET_PAGE_MASK) == tlb_addr) { // hit!
+            haddr = addr + tlb_entry(env, mmu_idx, addr)->addend;
+        }
+
+        /*
+        * rwhelan: Hack to deal with the fact that we don't have the retaddr
+        * available at the time when we are translating from TCG, retaddr is
+        * handled in the TCG backend.  We get it here for LLVM.
+        */
+        if (execute_llvm && (retaddr == 0xDEADBEEF)){
+            retaddr = GETPC();
+        }
+
+        panda_callbacks_before_mem_read(cpu, cpu->panda_guest_pc, addr, memop_size(op), (void *)haddr);
+        ret = load_helper_real(env, addr, oi, retaddr, op, code_read, full_load);
+        panda_callbacks_after_mem_read(cpu, cpu->panda_guest_pc, addr, memop_size(op), (uint64_t)ret, (void *)haddr);
+        return ret;
+    } else {
+        return load_helper_real(env, addr, oi, retaddr, op, code_read, full_load);
+    }
 }
 
 /*
@@ -1925,7 +1968,7 @@ store_memop(void *haddr, uint64_t val, MemOp op)
 }
 
 static inline void QEMU_ALWAYS_INLINE
-store_helper(CPUArchState *env, target_ulong addr, uint64_t val,
+store_helper_real(CPUArchState *env, target_ulong addr, uint64_t val,
              TCGMemOpIdx oi, uintptr_t retaddr, MemOp op)
 {
     uintptr_t mmu_idx = get_mmuidx(oi);
@@ -2075,6 +2118,40 @@ store_helper(CPUArchState *env, target_ulong addr, uint64_t val,
 
     haddr = (void *)((uintptr_t)addr + entry->addend);
     store_memop(haddr, val, op);
+}
+
+static inline void QEMU_ALWAYS_INLINE
+store_helper(CPUArchState *env, target_ulong addr, uint64_t val,
+             TCGMemOpIdx oi, uintptr_t retaddr, MemOp op) {
+    if(unlikely(panda_use_memcb)) {
+        unsigned mmu_idx = get_mmuidx(oi);
+        CPUTLBEntry *entry = tlb_entry(env, mmu_idx, addr);
+        CPUState *cpu = env_cpu(env);
+        uintptr_t haddr = 0;
+
+        if ((addr & TARGET_PAGE_MASK) == tlb_addr_write(entry)) { // hit!
+            haddr = addr + entry->addend;
+        }
+
+        /*
+        * rwhelan: Hack to deal with the fact that we don't have the retaddr
+        * available at the time when we are translating from TCG, retaddr is
+        * handled in the TCG backend.  We get it here for LLVM.
+        */
+        if (execute_llvm && (retaddr == 0xDEADBEEF)){
+            retaddr = GETPC();
+        }
+
+        panda_callbacks_before_mem_write(cpu, cpu->panda_guest_pc, addr,
+                                         memop_size(op), (uint64_t)val,
+                                         (void *)haddr);
+        store_helper_real(env, addr, val, oi, retaddr, op);
+        panda_callbacks_after_mem_write(cpu, cpu->panda_guest_pc, addr,
+                                         memop_size(op), (uint64_t)val,
+                                         (void *)haddr);
+    } else {
+        store_helper_real(env, addr, val, oi, retaddr, op);
+    }
 }
 
 void helper_ret_stb_mmu(CPUArchState *env, target_ulong addr, uint8_t val,
@@ -2313,11 +2390,13 @@ uint64_t cpu_ldq_code(CPUArchState *env, abi_ptr addr)
     return full_ldq_code(env, addr, oi, 0);
 }
 
+// TODO: panda: alternative for the ifs in {load,store}_helper. needs to be expanded first and have stuff fixed
+#if 0
 #define PANDA_TLB_HELPER_ENTRY(direction)                                                           \
     unsigned mmu_idx = get_mmuidx(oi);                                                              \
     int index = (addr >> TARGET_PAGE_BITS) & (CPU_TLB_SIZE - 1);                                    \
     target_ulong tlb_addr = env->tlb_table[mmu_idx][index].addr_##direction;                        \
-    CPUState *cpu = ENV_GET_CPU(env);                                                               \
+    CPUState *cpu = env_cpu(env);                                                               \
     uintptr_t haddr = 0;                                                                            \
     if ((addr & TARGET_PAGE_MASK) == tlb_addr) { /* hit! */                                         \
         haddr = addr + env->tlb_table[mmu_idx][index].addend;                                       \
@@ -2332,32 +2411,52 @@ uint64_t cpu_ldq_code(CPUArchState *env, abi_ptr addr)
     }                                                                                               \
 \
 
+#define PANDA_TLB_HELPER_SIGNATURE_read(funcname)    \
+tcg_target_ulong funcname (CPUArchState *env, target_ulong addr TCGMemOpIdx oi, uintptr_t retaddr)
+#define PANDA_TLB_HELPER_SIGNATURE_Q_read(funcname)  \
+uint64_t funcname (CPUArchState *env, target_ulong addr TCGMemOpIdx oi, uintptr_t retaddr)
 #define PANDA_TLB_HELPER_RETVAL_read tcg_target_ulong ret=
 #define PANDA_TLB_HELPER_EXIT_read return ret;
+#define PANDA_TLB_HELPER_VAL_ARG_read
+#define PANDA_TLB_HELPER_CB_ARG_read (uint64_t)ret
+
+#define PANDA_TLB_HELPER_SIGNATURE_write(funcname)            \
+void funcname (CPUArchState *env, target_ulong addr, DATA_TYPE val, TCGMemOpIdx oi, uintptr_t retaddr)
+#define PANDA_TLB_HELPER_SIGNATURE_Q_write(funcname)          \
+void funcname (CPUArchState *env, target_ulong addr, DATA_TYPE val, TCGMemOpIdx oi, uintptr_t retaddr)
 #define PANDA_TLB_HELPER_RETVAL_write
 #define PANDA_TLB_HELPER_EXIT_write
+#define PANDA_TLB_HELPER_VAL_ARG_write (uint64_t)val,
+#define PANDA_TLB_HELPER_CB_ARG_write (uint64_t)val
+
+#define PANDA_TLB_HELPER_MO_le MO_LEQ
+#define PANDA_TLB_HELPER_MO_be MO_BEQ
 
 #define PANDA_TLB_HELPER(cbname, endian, op, width)                                                 \
-tcg_target_ulong helper_##endian##_##op##width##_mmu_panda(CPUArchState *env, target_ulong addr,    \
-                                    TCGMemOpIdx oi, uintptr_t retaddr)                              \
+PANDA_TLB_HELPER_SIGNATURE_##cbname(helper_##endian##_##op##width##_mmu_panda)                      \
 {                                                                                                   \
     PANDA_TLB_HELPER_ENTRY(cbname)                                                                  \
-    panda_callbacks_before_mem_##cbname(cpu, cpu->panda_guest_pc, addr, DATA_SIZE, (void *)haddr);  \
-    PANDA_TLB_HELPER_RETVAL_##cbname full_##endian##_##op##width##_mmu(env,addr,oi,retaddr);        \
-    panda_callbacks_after_mem_##cbname(cpu, cpu->panda_guest_pc, addr, DATA_SIZE, (uint64_t)ret, (void *)haddr); \
+    panda_callbacks_before_mem_##cbname(cpu, cpu->panda_guest_pc, addr, DATA_SIZE,                  \
+                                        PANDA_TLB_HELPER_VAL_ARG_##cbname (void *)haddr);           \
+    PANDA_TLB_HELPER_RETVAL_##cbname full_##endian##_##op##width##_mmu(env,addr,                    \
+                                        PANDA_TLB_HELPER_VAL_ARG_##cbname oi,retaddr);              \
+    panda_callbacks_after_mem_##cbname(cpu, cpu->panda_guest_pc, addr, DATA_SIZE,                   \
+                                       PANDA_TLB_HELPER_CB_ARG_##cbname, (void *)haddr);            \
     PANDA_TLB_HELPER_EXIT_##cbname                                                                  \
 }                                                                                                   \
 \
 
 #define PANDA_TLB_HELPER_Q(cbname, prefix, endian, op)                                              \
-uint64_t helper_##endian##_##op##q_mmu_panda(CPUArchState *env, target_ulong addr,                  \
-                           TCGMemOpIdx oi, uintptr_t retaddr)                                       \
+PANDA_TLB_HELPER_SIGNATURE_Q_##cbname(helper_##endian##_##op##q_mmu_panda)                          \
 {                                                                                                   \
     PANDA_TLB_HELPER_ENTRY(cbname)                                                                  \
-    panda_callbacks_before_mem_##cbname(cpu, cpu->panda_guest_pc, addr, DATA_SIZE, (void *)haddr);  \
-    PANDA_TLB_HELPER_RETVAL_##cbname prefix##_helper(env, addr, oi, retaddr, MO_LEQ, false,         \
-                       helper_##endian##_##op##q_mmu);                                              \
-    panda_callbacks_after_mem_##cbname(cpu, cpu->panda_guest_pc, addr, DATA_SIZE, (uint64_t)ret, (void *)haddr); \
+    panda_callbacks_before_mem_##cbname(cpu, cpu->panda_guest_pc, addr, DATA_SIZE,                  \
+                                        PANDA_TLB_HELPER_VAL_ARG_##cbname (void *)haddr);           \
+    PANDA_TLB_HELPER_RETVAL_##cbname prefix##_helper(env, addr, PANDA_TLB_HELPER_VAL_ARG_##cbname   \
+                                                     PANDA_TLB_HELPER_MO_##endian, false,           \
+                                                     helper_##endian##_##op##q_mmu);                \
+    panda_callbacks_after_mem_##cbname(cpu, cpu->panda_guest_pc, addr, DATA_SIZE,                   \
+                                       PANDA_TLB_HELPER_CB_ARG_##cbname, (void *)haddr);            \
     PANDA_TLB_HELPER_EXIT_##cbname                                                                  \
 }                                                                                                   \
 \
@@ -2381,3 +2480,5 @@ PANDA_TLB_HELPER_X(write, store, be, st)
 #undef PANDA_TLB_HELPER
 #undef PANDA_TLB_HELPER_Q
 #undef PANDA_TLB_HELPER_X
+
+#endif

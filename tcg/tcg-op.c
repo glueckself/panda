@@ -2680,11 +2680,15 @@ void tcg_gen_exit_tb(TranslationBlock *tb, unsigned idx)
         if (qemu_loglevel_mask(CPU_LOG_TB_NOCHAIN)) {
             val = 0;
         }
+    } 
+    //TODO: panda: does anything need to be done with this or can I remove it?
+#if 0
+    else if(idx == TB_EXIT_ICOUNT_EXPIRED) {
     } else {
         /* This is an exit via the exitreq label.  */
         tcg_debug_assert(idx == TB_EXIT_REQUESTED);
     }
-
+#endif
     plugin_gen_disable_mem_helpers();
     tcg_gen_op1i(INDEX_op_exit_tb, val);
 }
