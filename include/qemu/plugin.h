@@ -168,7 +168,7 @@ struct qemu_plugin_insn *qemu_plugin_tb_insn_get(struct qemu_plugin_tb *tb)
         struct qemu_plugin_insn *new_insn = qemu_plugin_insn_alloc();
         g_ptr_array_add(tb->insns, new_insn);
     }
-    insn = g_ptr_array_index(tb->insns, tb->n++);
+    insn = (struct qemu_plugin_insn*)g_ptr_array_index(tb->insns, tb->n++);
     g_byte_array_set_size(insn->data, 0);
     insn->calls_helpers = false;
     insn->mem_helper = false;

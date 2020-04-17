@@ -2177,7 +2177,7 @@ static inline uint8_t address_space_ldub_cached(MemoryRegionCache *cache,
 {
     assert(addr < cache->len);
     if (likely(cache->ptr)) {
-        return ldub_p(cache->ptr + addr);
+        return ldub_p(((char*)(cache->ptr)) + addr);
     } else {
         return address_space_ldub_cached_slow(cache, addr, attrs, result);
     }
@@ -2188,7 +2188,7 @@ static inline void address_space_stb_cached(MemoryRegionCache *cache,
 {
     assert(addr < cache->len);
     if (likely(cache->ptr)) {
-        stb_p(cache->ptr + addr, val);
+        stb_p(((char*)(cache->ptr)) + addr, val);
     } else {
         address_space_stb_cached_slow(cache, addr, val, attrs, result);
     }
@@ -2418,7 +2418,7 @@ address_space_read_cached(MemoryRegionCache *cache, hwaddr addr,
 {
     assert(addr < cache->len && len <= cache->len - addr);
     if (likely(cache->ptr)) {
-        memcpy(buf, cache->ptr + addr, len);
+        memcpy(buf, ((char*)(cache->ptr)) + addr, len);
     } else {
         address_space_read_cached_slow(cache, addr, buf, len);
     }
@@ -2438,7 +2438,7 @@ address_space_write_cached(MemoryRegionCache *cache, hwaddr addr,
 {
     assert(addr < cache->len && len <= cache->len - addr);
     if (likely(cache->ptr)) {
-        memcpy(cache->ptr + addr, buf, len);
+        memcpy(((char*)(cache->ptr)) + addr, buf, len);
     } else {
         address_space_write_cached_slow(cache, addr, buf, len);
     }
@@ -2453,13 +2453,13 @@ static inline MemOp devend_memop(enum device_endian end)
 
 #if defined(HOST_WORDS_BIGENDIAN) != defined(TARGET_WORDS_BIGENDIAN)
     /* Swap if non-host endianness or native (target) endianness */
-    return (end == DEVICE_HOST_ENDIAN) ? 0 : MO_BSWAP;
+    return (MemOp)((end == DEVICE_HOST_ENDIAN) ? 0 : MO_BSWAP);
 #else
     const int non_host_endianness =
         DEVICE_LITTLE_ENDIAN ^ DEVICE_BIG_ENDIAN ^ DEVICE_HOST_ENDIAN;
 
     /* In this case, native (target) endianness needs no swap.  */
-    return (end == non_host_endianness) ? MO_BSWAP : 0;
+    return (MemOp)((end == non_host_endianness) ? MO_BSWAP : 0);
 #endif
 }
 #endif

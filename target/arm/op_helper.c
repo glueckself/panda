@@ -23,6 +23,7 @@
 #include "internals.h"
 #include "exec/exec-all.h"
 #include "exec/cpu_ldst.h"
+#include "qemu/main-loop.h"
 
 #include "panda/callback_support.h"
 #include "panda/helper_impl.h"

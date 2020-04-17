@@ -13,7 +13,7 @@
 PANDAENDCOMMENT */
 
 #include "panda/plugin.h"
-#include "qmp-commands.h"
+#include "qapi/qapi-commands-ui.h"
 
 int before_block_callback(CPUState *env, TranslationBlock *tb);
 
@@ -30,7 +30,8 @@ int before_block_callback(CPUState *env, TranslationBlock *tb) {
     if (rr_get_percentage() >= num) {
         Error *errp;
         snprintf(fname, 255, "replay_movie_%03d.ppm", (int)num);
-        qmp_screendump(fname, &errp);
+	//TODO: panda: see monitor/hmp-cmds.c
+        qmp_screendump(fname, false, NULL, false, NULL, &errp);
         num += 1;
     }
     return 1;
@@ -53,6 +54,6 @@ void uninit_plugin(void *self) {
     Error *errp;
     char fname[256] = {0};
     snprintf(fname, 255, "replay_movie_%03d.ppm", num);
-    qmp_screendump(fname, &errp);
+    qmp_screendump(fname, false, NULL, false, NULL, &errp);
     printf("Unloading replaymovie plugin.\n");
 }

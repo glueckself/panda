@@ -702,7 +702,8 @@ static inline TCGTemp *arg_temp(TCGArg a)
 static inline TCGTemp *tcgv_i32_temp(TCGv_i32 v)
 {
     uintptr_t o = (uintptr_t)v;
-    TCGTemp *t = (void *)tcg_ctx + o;
+    //TODO: panda: llvm doesn't like void*, make that char*
+    TCGTemp *t = (TCGTemp*)((char*)tcg_ctx + o);
     //TODO: panda: this breaks c++ code. not idea why
 //    tcg_debug_assert(offsetof(TCGContext, temps[temp_idx(t)]) == o);
     return t;
