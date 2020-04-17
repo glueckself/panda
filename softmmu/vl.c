@@ -1706,13 +1706,15 @@ static void tcg_llvm_cleanup(void)
 }
 #endif
 
-void main_loop(void)
+void qemu_main_loop(void)
 {
     bool nonblocking;
     int last_io = 0;
 #ifdef CONFIG_PROFILER
     int64_t ti;
 #endif
+    panda_in_main_loop = 1;
+    //TODO: panda: what to do with last_io?
     while (!main_loop_should_exit()) {
         nonblocking = tcg_enabled() && last_io > 0;
 #ifdef CONFIG_PROFILER
@@ -1772,6 +1774,7 @@ void main_loop(void)
         dev_time += profile_getclock() - ti;
 #endif
     }
+    panda_in_main_loop = 0;
 }
 
 static void version(void)
@@ -3934,7 +3937,6 @@ void qemu_init(int argc, char **argv, char **envp)
                 break;
 #endif
             case QEMU_OPTION_replay:
-                display_type = DT_NONE;
                 replay_name = optarg;
                 break;
             case QEMU_OPTION_pandalog:
@@ -4767,24 +4769,21 @@ void qemu_init(int argc, char **argv, char **envp)
 
     // Call PANDA post-machine init hook
     panda_callbacks_after_machine_init();
+}
 
-    panda_in_main_loop = 1;
-    main_loop();
-    panda_in_main_loop = 0;
-
+void qemu_cleanup() {
     if(rr_in_record()){
         rr_do_end_record();
     }
 
     replay_disable_events();
-    iothread_stop_all();
+    //TODO: panda: implement stop_all!
+    //iothread_stop_all();
 
     panda_cleanup();
 
     pause_all_vcpus();
     
-void qemu_cleanup(void)
-{
     gdbserver_cleanup();
 
     /*

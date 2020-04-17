@@ -1919,6 +1919,8 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     }
 #endif
 
+//TODO: panda: needs to be replaced with tcb_tb_foreach(iter...)
+#if 0
 #ifdef CONFIG_LLVM
     // Sanity check. We had a bug before where we were misrecording
     // translated code sizes, and so TC blocks appeared to overlap.
@@ -1936,6 +1938,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
             }
         }
     }
+#endif
 #endif
 
     atomic_set(&tcg_ctx->code_gen_ptr, (void *)

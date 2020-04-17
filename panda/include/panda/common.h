@@ -14,7 +14,6 @@
 #include <cstdint>
 #include <cstdbool>
 #endif
-#include "cpu.h"
 #include "exec/address-spaces.h"
 #include "panda/types.h"
 

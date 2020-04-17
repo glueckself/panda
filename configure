@@ -2328,7 +2328,7 @@ if test -z "$want_tools"; then
     if test "$softmmu" = "no"; then
         want_tools=no
     else
-        want_tools=yes
+        want_tools=no
     fi
 fi
 
@@ -6546,6 +6546,7 @@ if test "$softmmu" = yes ; then
   fi
 fi
 
+tools=""
 # Probe for guest agent support/options
 
 if [ "$guest_agent" != "no" ]; then
@@ -8169,6 +8170,9 @@ esac
 if [ "$TARGET_BASE_ARCH" = "" ]; then
   TARGET_BASE_ARCH=$TARGET_ARCH
 fi
+
+#PANDA: no mttcg!
+mttcg="no"
 
 symlink "$source_path/Makefile.target" "$target_dir/Makefile"
 

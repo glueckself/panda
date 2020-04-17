@@ -29,10 +29,10 @@
 #define UNUSED(x) x
 #endif
 
+#include "cpu.h"
 #if defined(__cplusplus)
 extern "C" {
 #endif
-#include "cpu.h"
 #if defined(__cplusplus)
 }
 #endif

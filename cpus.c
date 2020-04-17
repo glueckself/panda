@@ -1523,13 +1523,16 @@ static void *qemu_tcg_rr_cpu_thread_fn(void *arg)
             panda_callbacks_top_loop();
         }
 
+	//TODO: panda: where does this come from
+#if 0
         qemu_mutex_unlock_iothread();
         replay_mutex_lock();
         qemu_mutex_lock_iothread();
+#endif
         /* Account partial waits to QEMU_CLOCK_VIRTUAL.  */
         qemu_account_warp_timer();
 
-        replay_mutex_unlock();
+//        replay_mutex_unlock();
 
         if (!cpu) {
             cpu = first_cpu;

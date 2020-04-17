@@ -14,9 +14,9 @@ $(call set-vpath, $(SRC_PATH):$(BUILD_DIR))
 ifdef CONFIG_LINUX
 QEMU_CFLAGS += -isystem ../linux-headers
 endif
-QEMU_CFLAGS += -iquote .. -iquote $(SRC_PATH)/target/$(TARGET_BASE_ARCH) -DNEED_CPU_H
+CFLAGS += -iquote .. -iquote $(SRC_PATH)/target/$(TARGET_BASE_ARCH) -DNEED_CPU_H
 
-QEMU_CFLAGS+=-iquote $(SRC_PATH)/include
+CFLAGS+=-iquote $(SRC_PATH)/include
 
 ifdef CONFIG_USER_ONLY
 # user emulator name
@@ -98,15 +98,11 @@ stap:
 endif
 .PHONY: stap
 
-#########################################################
-# Panda code
-#########################################################
-include $(SRC_PATH)/panda/Makefile.panda.target
-
 all: $(PROGS) stap
 
 # Dummy command so that make thinks it has done something
 	@true
+
 
 obj-y += trace/
 
@@ -131,7 +127,7 @@ obj-$(CONFIG_PLUGIN) += plugins/
 
 ifdef CONFIG_LINUX_USER
 
-QEMU_CFLAGS+=-I$(SRC_PATH)/linux-user/$(TARGET_ABI_DIR) \
+CFLAGS+=-I$(SRC_PATH)/linux-user/$(TARGET_ABI_DIR) \
              -I$(SRC_PATH)/linux-user/host/$(ARCH) \
              -I$(SRC_PATH)/linux-user \
              -Ilinux-user/$(TARGET_ABI_DIR)
@@ -180,6 +176,11 @@ generated-files-y += hmp-commands.h hmp-commands-info.h
 generated-files-y += config-devices.h
 
 endif # CONFIG_SOFTMMU
+
+#########################################################
+# Panda code
+#########################################################
+include $(SRC_PATH)/panda/Makefile.panda.target
 
 dummy := $(call unnest-vars,,obj-y)
 all-obj-y := $(obj-y)
@@ -263,6 +264,8 @@ endif
 
 generated-files-y += config-target.h
 Makefile: $(generated-files-y)
+
+
 
 # Reports/Analysis
 #

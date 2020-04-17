@@ -131,6 +131,7 @@ PANDA_AUX_CPP_HEADER="--enable-aux-libcpp-header --with-aux-libcpp-header=${PAND
     $PANDA_AUX_CPP_HEADER \
     --prefix="$(pwd)/install" \
     --enable-debug \
+    --disable-werror \
     $COMPILER_CONFIG \
     $LLVM_CONFIG \
     $MISC_CONFIG \

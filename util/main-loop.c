@@ -494,7 +494,7 @@ void main_loop_poll_remove_notifier(Notifier *notify)
     notifier_remove(notify);
 }
 
-void main_loop_wait(int nonblocking)
+int main_loop_wait(int nonblocking)
 {
     MainLoopPoll mlpoll = {
         .state = MAIN_LOOP_POLL_FILL,
@@ -546,6 +546,8 @@ void main_loop_wait(int nonblocking)
     rr_begin_main_loop_wait();
     qemu_clock_run_all_timers();
     rr_end_main_loop_wait();
+
+    return ret;
 }
 
 /* Functions to operate on the main QEMU AioContext.  */
