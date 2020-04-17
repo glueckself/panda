@@ -306,12 +306,28 @@ extern int daemon(int, int);
  * &(x)[0] is always a pointer - if it's same type as x then the argument is a
  * pointer, not an array.
  */
+#if __cplusplus
+extern "C++" {
+#include <type_traits>
+#define QEMU_IS_ARRAY(x) ((int)(std::is_array<x>::value))
+
+#ifndef ARRAY_SIZE
+//TODO: panda: make sure that x is an array
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+#endif
+
+};
+#else //__cplusplus
+
 #define QEMU_IS_ARRAY(x) (!__builtin_types_compatible_p(typeof(x), \
                                                         typeof(&(x)[0])))
+
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(x) ((sizeof(x) / sizeof((x)[0])) + \
                        QEMU_BUILD_BUG_ON_ZERO(!QEMU_IS_ARRAY(x)))
 #endif
+
+#endif //__cplusplus
 
 int qemu_daemon(int nochdir, int noclose);
 void *qemu_try_memalign(size_t alignment, size_t size);

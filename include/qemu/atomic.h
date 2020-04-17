@@ -27,7 +27,8 @@
  * converted to a non-qualified type just by applying a binary operator.
  */
 #ifdef __cplusplus
-#define typeof_strip_qual(expr) typeof(expr)
+#include <type_traits>
+#define typeof_strip_qual(expr) std::remove_cv<std::remove_reference<decltype(expr)>::type>::type
 #else
 #define typeof_strip_qual(expr)                                                    \
   typeof(                                                                          \

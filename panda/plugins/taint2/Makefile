@@ -23,13 +23,16 @@ TAINT2_SRC  = $(notdir $(wildcard $(PLUGIN_SRC_DIR)/*.cpp))
 TAINT2_SRC := $(filter-out my_mem.cpp,$(TAINT2_SRC))
 TAINT2_OBJ  = $(patsubst %.cpp,$(PLUGIN_OBJ_DIR)/%.o,$(TAINT2_SRC))
 
+
+LLVM_QEMU_CXXFLAGS = -Wno-error -std=c++11 $(filter-out -std=%, $(QEMU_CXXFLAGS)) $(filter-out -std=%, $(CXXFLAGS))
+LLVM_QEMU_CFLAGS = -Wno-error $(filter-out -std=%, $(QEMU_CFLAGS)) $(filter-out -std=%, $(CFLAGS))
 ### Rules and recipes ###############################################
 %_llvm.bc: %.cpp $(wildcard *.h)
 	@[ -d $(dir $@) ] || mkdir -p $(dir $@)
 	$(call quiet-command,\
 		$(filter-out $(TAINT_OP_FILTER),\
-			$(LLVMCXX) $(QEMU_INCLUDES) $(QEMU_CFLAGS) $(QEMU_CXXFLAGS) \
-			$(QEMU_DGFLAGS) $(CXXFLAGS) $(TAINT_OP_CFLAGS) \
+			$(LLVMCXX) $(QEMU_INCLUDES) $(LLVM_QEMU_CFLAGS) $(LLVM_QEMU_CXXFLAGS) \
+			$(QEMU_DGFLAGS) $(TAINT_OP_CFLAGS) \
 			-emit-llvm -c -o $@ $<),"CLANGXX $(TARGET_DIR)$@")
 
 $(PLUGIN_TARGET_DIR)/panda_taint2_ops.bc: $(PLUGIN_OBJ_DIR)/taint_ops_llvm.bc
